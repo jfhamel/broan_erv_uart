@@ -36,7 +36,7 @@ namespace broan {
 #define FILTER_LIFE_MAX 7884000
 
 //#define SCAN_UNKNOWN 1
-#define LISTEN_ONLY 1
+//#define LISTEN_ONLY 1
 
 template<typename T>
 concept BroanFieldTypes = 	std::is_same_v<T, float> ||
