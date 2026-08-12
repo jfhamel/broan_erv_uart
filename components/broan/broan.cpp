@@ -317,7 +317,7 @@ std::string BroanComponent::fanModeToString( uint8_t value )
 	switch( value )
 	{
 		case BroanFanMode::Ovr: return "ovr";
-		case BroanFanMode::Intermittent: return "int";
+		case BroanFanMode::Intermittent: return "intermittent";
 		case BroanFanMode::Min: return "min";
 		case BroanFanMode::Max: return "max";
 		case BroanFanMode::Manual: return "exchange";
@@ -481,7 +481,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !temperature_out_sensor_ || std::isnan( pField->m_value.m_flValue ) )
 					continue;
 
-				temperature_out_sensor_->publish_state(pField->m_value.m_flValue);
+				temperature_out_sensor_->publish_state(pField->m_value.m_flValue);		
 			}
 			break;
 
@@ -495,7 +495,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 			}
 			break;
 
-#endif
+#endif	
 #ifdef USE_NUMBER
 			case BroanField::TargetHumidityA:
 				if( !humidity_setpoint_number_ )

@@ -67,24 +67,22 @@ enum BroanCFMMode
 	Both = BroanCFMMode::Input | BroanCFMMode::Output,
 };
 
+// Values for register 00:20 (commanded mode) *and* 02:20 (base/underlying mode).
+// Confirmed by capturing every mode on the physical wall controller, one at a time.
 enum BroanFanMode
 {
 	Off = 0x01,
-	Ovr = 0x02,
-	// 0x03 ??
-	// 0x04 ??
+	Ovr = 0x02,            // Bathroom boost button (dry contact on the OVR terminal). Read-only: never written over RS-485.
 	RecirculateMin = 0x05,
-	Recirculate = 0x06,    // Recirculate Max - To be renamed
+	Recirculate = 0x06,    // Recirculate Max
 	RecirculateMed = 0x07,
 	Intermittent = 0x08,
-	Min = 0x09,             // Continuous (exchange) Min - To be renamed
-	Max = 0x0a,             // Continuous (exchange) Max - To be renamed
-	Manual = 0x0b,          // Continuous (exchange), Med - To be renamed
+	Min = 0x09,             // Continuous (exchange) Min
+	Max = 0x0a,             // Continuous (exchange) Max
+	Manual = 0x0b,          // Continuous (exchange), variable speed via CFMIn/Out_Medium
 	Turbo = 0x0c,
 	Humidity = 0x0d,        // Deshumidistat. ERV sets this itself once 0F:22=1 is written; never write it directly.
-	// 0x0e ??
 	Away = 0x0F,            // Absence (weekly presence schedule override)
-	// 0x10 ??
 	Smart = 0x11,
 };
 
@@ -120,12 +118,12 @@ enum BroanField
 
 	// Input
 	Heartbeat, // Weird void value that controllers ping every 10s
-	ControllerHumidity,
-	ControllerTemperature,
+	ControllerHumidity,    // Write-only. Current indoor humidity (%) - fed in from whatever instrument you configure in your YAML (a Home Assistant sensor, a probe wired to the ESP32, etc). There is no wall controller left on the bus once the ESP32 is the sole controller, so this can't come from one.
+	ControllerTemperature, // Write-only. Current indoor temperature (C) - same as above: supplied by an external instrument you configure, not read from a wall controller.
 
 	// Maintenance
 	FilterReset, // Set to 1 to reset
-	FilterLife, // default 7884000 / 3 months
+	FilterLife, // default 7884000 / 3 months. Seconds.
 
 	// Unknown fields that look interesting but aren't understood nor read by controllers
 	UnknownA,
@@ -247,8 +245,8 @@ public:
 
 		//Input
 		{ 0x00, 0x50, BroanFieldType::Void, {0}, UPDATE_RATE_NEVER }, // Unknown. Controllers regularly write this. Some kind of heartbeat maybe?
-		{ 0x04, 0x50, BroanFieldType::Float, {0}, UPDATE_RATE_NEVER }, // Controller Humidity (Write only)
-		{ 0x05, 0x50, BroanFieldType::Float, {0}, UPDATE_RATE_NEVER }, // Controller temperature (Write only)
+		{ 0x04, 0x50, BroanFieldType::Float, {0}, UPDATE_RATE_NEVER }, // Controller Humidity (Write only) -> published as indoor_humidity
+		{ 0x05, 0x50, BroanFieldType::Float, {0}, UPDATE_RATE_NEVER }, // Controller temperature (Write only) -> published as indoor_temperature
 
 		// Maintenance
 		{ 0x01, 0x30, BroanFieldType::Byte, {0}, UPDATE_RATE_SLOW }, // Set to 0x01 to reset filter

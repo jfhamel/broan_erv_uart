@@ -44,6 +44,7 @@ async def to_code(config):
             options=[
                 "off",
                 "smart",
+                "intermittent",
                 "exchange",
                 "recirculation",
                 "absence",

@@ -13,6 +13,8 @@ void BroanComponent::setFanMode( std::string mode )
 	// and we've never captured a plain "turbo, no duration" write, so we don't emulate one.
 	if( mode == "smart" )
 		value = BroanFanMode::Smart;
+	else if( mode == "intermittent" )
+		value = BroanFanMode::Intermittent;
 	else if( mode == "exchange" )
 	{
 		value = BroanFanMode::Manual;
@@ -41,8 +43,22 @@ void BroanComponent::setFanMode( std::string mode )
 
 void BroanComponent::setFanSpeed( float input )
 {
-	// Continuous exchange (Manual/0x0B): genuine variable-speed target, confirmed by capture.
-	if( m_eSpeedFamily == BroanFanMode::Manual )
+	// Continuous exchange (Manual/0x0B) is confirmed by capture: the physical wall
+	// controller never offers this, but the ERV honors any CFM target you write
+	// into 06:22/08:22 while sitting in that mode.
+	//
+	// Recirculation (Recirculate/RecirculateMin/RecirculateMed) uses the exact same
+	// mechanism here, on the assumption that 06:22/08:22 is a general "current speed
+	// target" the ERV applies whenever you're in an adjustable tier, not something
+	// tied specifically to continuous exchange. This has NOT been confirmed by
+	// capture - verify with the supply/exhaust CFM sensors that real airflow
+	// actually follows the slider while in recirculation. If it turns out the ERV
+	// ignores this and stays pinned to the nearest fixed step, this will need to
+	// go back to writing FanMode directly to one of the three discrete values.
+	if( m_eSpeedFamily == BroanFanMode::Manual ||
+	    m_eSpeedFamily == BroanFanMode::Recirculate ||
+	    m_eSpeedFamily == BroanFanMode::RecirculateMin ||
+	    m_eSpeedFamily == BroanFanMode::RecirculateMed )
 	{
 		float flMin = m_vecFields[CFMIn_Min].m_value.m_flValue;
 		float flMax = m_vecFields[CFMIn_Max].m_value.m_flValue;
@@ -61,30 +77,6 @@ void BroanComponent::setFanSpeed( float input )
 		m_vecFields[CFMIn_Medium].markDirty();
 		m_vecFields[CFMOut_Medium].markDirty();
 
-		writeRegisters( vecFields );
-		return;
-	}
-
-	// Recirculation: PROVISIONAL. We've only confirmed three discrete steps
-	// (RecirculateMin/Med/Max = 0x05/0x07/0x06) by capturing the wall controller directly -
-	// no continuous CFM target has been found for this mode. Until we know otherwise, we
-	// bucket the 0-100% slider into those three steps instead of writing a CFM target.
-	// TODO: revisit if a continuous recirculation register turns up.
-	if( m_eSpeedFamily == BroanFanMode::Recirculate ||
-		m_eSpeedFamily == BroanFanMode::RecirculateMin ||
-		m_eSpeedFamily == BroanFanMode::RecirculateMed )
-	{
-		uint8_t value;
-		if( input < 33.f )
-			value = BroanFanMode::RecirculateMin;
-		else if( input < 67.f )
-			value = BroanFanMode::RecirculateMed;
-		else
-			value = BroanFanMode::Recirculate;
-
-		std::vector<BroanField_t> vecFields;
-		vecFields.push_back( m_vecFields[FanMode].copyForUpdate( value ) );
-		m_vecFields[FanMode].markDirty();
 		writeRegisters( vecFields );
 		return;
 	}

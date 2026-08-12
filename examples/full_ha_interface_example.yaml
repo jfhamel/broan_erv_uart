@@ -1,0 +1,103 @@
+external_components:
+  - source:
+      type: git
+      url: https://github.com/nspitko/broan_erv_uart # remplace par ton fork si applicable
+      ref: main
+    components: [ broan ]
+
+uart:
+  id: rs485
+  tx_pin: GPIO17
+  rx_pin: GPIO18
+  baud_rate: 38400
+  rx_buffer_size: 2048
+
+broan:
+  uart_id: rs485
+  id: mybroan
+
+select:
+  - platform: broan
+    fan_mode:
+      name: "Mode de ventilation" # off / smart / intermittent / exchange / recirculation / absence
+    turbo_duration:
+      name: "Durée du Turbo"      # 1h / 2h / 4h - sélectionner active le Turbo
+
+number:
+  - platform: broan
+    fan_speed:
+      name: "Vitesse"             # 0-100%, s'applique en mode exchange ou recirculation
+    humidity_setpoint:
+      name: "Seuil d'humidité cible"
+
+switch:
+  - platform: broan
+    humidity_control:
+      name: "Contrôle d'humidité"
+      id: humcontrol
+      on_turn_on:
+        then:
+          lambda: id(mybroan).setCurrentHumidity(id(myhumidity).state);
+
+text_sensor:
+  - platform: broan
+    current_mode:
+      name: "Ventilation en cours" # exchange / recirculation / off
+
+sensor:
+  - platform: broan
+    power:
+      name: "Puissance"
+    temperature:
+      name: "Température (admission ERV)"
+    temperature_out:
+      name: "Température (évacuation ERV)"
+    filter_life:
+      name: "Durée de vie restante du filtre"
+    supply_fan_cfm:
+      name: "Débit soufflage (CFM)"
+    exhaust_fan_cfm:
+      name: "Débit extraction (CFM)"
+    supply_fan_rpm:
+      name: "Vitesse moteur soufflage (RPM)"
+    exhaust_fan_rpm:
+      name: "Vitesse moteur extraction (RPM)"
+    turbo_remaining:
+      name: "Temps restant (Turbo)"
+    indoor_temperature:
+      name: "Température intérieure"
+    indoor_humidity:
+      name: "Humidité intérieure"
+
+  # Source: instrument séparé fournissant l'humidité intérieure - un capteur HA (comme
+  # ici) ou une sonde câblée directement à l'ESP32. Obligatoire dès que l'ESP32 est le
+  # seul contrôleur sur le bus RS-485 : il n'y a alors plus de contrôleur mural physique
+  # pour fournir cette valeur à l'ERV.
+  - platform: homeassistant
+    id: myhumidity
+    name: "Home Assistant Humidity"
+    internal: true
+    entity_id: sensor.third_reality_1_humidite
+    on_value:
+      then:
+        lambda: |-
+          if (id(humcontrol).state) {
+            id(mybroan).setCurrentHumidity(id(myhumidity).state);
+          }
+
+  # Source: même principe pour la température intérieure - remplace par n'importe quel
+  # capteur HA existant, ou une lambda lisant directement un capteur câblé à l'ESP32.
+  # setCurrentTemperature() republie automatiquement vers indoor_temperature ci-dessus.
+  - platform: homeassistant
+    id: mytemperature
+    name: "Home Assistant Temperature"
+    internal: true
+    entity_id: sensor.third_reality_1_temperature
+    on_value:
+      then:
+        lambda: id(mybroan).setCurrentTemperature(id(mytemperature).state);
+
+button:
+  - platform: broan
+    filter_reset:
+      name: "Réinitialiser le filtre"
