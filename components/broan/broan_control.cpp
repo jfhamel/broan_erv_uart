@@ -7,22 +7,25 @@ void BroanComponent::setFanMode( std::string mode )
 {
 	uint8_t value = 0x01;
 
-	if( mode == "min")
-		value = BroanFanMode::Min;
-	else if (mode == "max" )
-		value = BroanFanMode::Max;
-	else if( mode == "manual" )
+	// Top-level modes exposed to Home Assistant. "off"/"smart"/"exchange"/"recirculation"/"absence"
+	// are simple, single-register writes. Turbo is deliberately NOT selectable here: the real wall
+	// controller always writes TurboDuration + FanMode together in one frame (see setTurboDuration()),
+	// and we've never captured a plain "turbo, no duration" write, so we don't emulate one.
+	if( mode == "smart" )
+		value = BroanFanMode::Smart;
+	else if( mode == "exchange" )
+	{
 		value = BroanFanMode::Manual;
-	else if( mode == "int" )
-		value = BroanFanMode::Intermittent;
-	else if( mode == "turbo" )
-		value = BroanFanMode::Turbo;
-	else if( mode == "humidity" )
-		value = BroanFanMode::Humidity;
-	else if( mode == "ovr" )
-		value = BroanFanMode::Ovr;
-	else if( mode == "recirculate" )
+		m_eSpeedFamily = BroanFanMode::Manual;
+	}
+	else if( mode == "recirculation" )
+	{
+		// Defaults to Max; use the fan_speed number to pick a level.
 		value = BroanFanMode::Recirculate;
+		m_eSpeedFamily = BroanFanMode::Recirculate;
+	}
+	else if( mode == "absence" )
+		value = BroanFanMode::Away;
 	else
 		value = BroanFanMode::Off;
 
@@ -38,26 +41,55 @@ void BroanComponent::setFanMode( std::string mode )
 
 void BroanComponent::setFanSpeed( float input )
 {
-	//return;
-	float flMin = m_vecFields[CFMIn_Min].m_value.m_flValue;
-	float flMax = m_vecFields[CFMIn_Max].m_value.m_flValue;
-	if( flMin == 0 || flMax == 0 )
+	// Continuous exchange (Manual/0x0B): genuine variable-speed target, confirmed by capture.
+	if( m_eSpeedFamily == BroanFanMode::Manual )
 	{
-		ESP_LOGE("broan","Failed to set fan speed: Invalid min/max state");
+		float flMin = m_vecFields[CFMIn_Min].m_value.m_flValue;
+		float flMax = m_vecFields[CFMIn_Max].m_value.m_flValue;
+		if( flMin == 0 || flMax == 0 )
+		{
+			ESP_LOGE("broan","Failed to set fan speed: Invalid min/max state");
+			return;
+		}
+		float value = remap( input, 0.f, 100.f, flMin, flMax );
+
+		std::vector<BroanField_t> vecFields;
+
+		vecFields.push_back( m_vecFields[CFMIn_Medium].copyForUpdate( value ) );
+		vecFields.push_back( m_vecFields[CFMOut_Medium].copyForUpdate( value ) );
+
+		m_vecFields[CFMIn_Medium].markDirty();
+		m_vecFields[CFMOut_Medium].markDirty();
+
+		writeRegisters( vecFields );
 		return;
 	}
-	float value = remap( input, 0.f, 100.f, flMin, flMax );
 
-	std::vector<BroanField_t> vecFields;
+	// Recirculation: PROVISIONAL. We've only confirmed three discrete steps
+	// (RecirculateMin/Med/Max = 0x05/0x07/0x06) by capturing the wall controller directly -
+	// no continuous CFM target has been found for this mode. Until we know otherwise, we
+	// bucket the 0-100% slider into those three steps instead of writing a CFM target.
+	// TODO: revisit if a continuous recirculation register turns up.
+	if( m_eSpeedFamily == BroanFanMode::Recirculate ||
+		m_eSpeedFamily == BroanFanMode::RecirculateMin ||
+		m_eSpeedFamily == BroanFanMode::RecirculateMed )
+	{
+		uint8_t value;
+		if( input < 33.f )
+			value = BroanFanMode::RecirculateMin;
+		else if( input < 67.f )
+			value = BroanFanMode::RecirculateMed;
+		else
+			value = BroanFanMode::Recirculate;
 
-	vecFields.push_back( m_vecFields[CFMIn_Medium].copyForUpdate( value ) );
-	vecFields.push_back( m_vecFields[CFMOut_Medium].copyForUpdate( value ) );
+		std::vector<BroanField_t> vecFields;
+		vecFields.push_back( m_vecFields[FanMode].copyForUpdate( value ) );
+		m_vecFields[FanMode].markDirty();
+		writeRegisters( vecFields );
+		return;
+	}
 
-	m_vecFields[CFMIn_Medium].markDirty();
-	m_vecFields[CFMOut_Medium].markDirty();
-
-	writeRegisters( vecFields );
-
+	ESP_LOGW("broan","setFanSpeed() only applies in 'exchange' or 'recirculation' modes");
 }
 
 
@@ -148,6 +180,29 @@ void BroanComponent::setCurrentHumidity( float humidity ) {
 	m_vecFields[ControllerHumidity].markDirty();
 
 	writeRegisters( vecFields );
+
+	// We already have the value in hand - no need to wait for a read-back that will
+	// never come (this register is write-only on the wire).
+#ifdef USE_SENSOR
+	if( indoor_humidity_sensor_ )
+		indoor_humidity_sensor_->publish_state( humidity );
+#endif
+}
+
+void BroanComponent::setCurrentTemperature( float temperature ) {
+	std::vector<BroanField_t> vecFields;
+
+	ESP_LOGI("broan_control", "Set current temperature: %0.1f C", temperature);
+
+	vecFields.push_back( m_vecFields[ControllerTemperature].copyForUpdate( temperature ) );
+	m_vecFields[ControllerTemperature].markDirty();
+
+	writeRegisters( vecFields );
+
+#ifdef USE_SENSOR
+	if( indoor_temperature_sensor_ )
+		indoor_temperature_sensor_->publish_state( temperature );
+#endif
 }
 
 void BroanComponent::setIntermittentPeriod( uint32_t period ) {
@@ -160,6 +215,22 @@ void BroanComponent::setIntermittentPeriod( uint32_t period ) {
 
 	vecFields.push_back( m_vecFields[IntModeDuration].copyForUpdate( period ) );
 	m_vecFields[IntModeDuration].markDirty();
+
+	writeRegisters( vecFields );
+}
+
+void BroanComponent::setTurboDuration( uint32_t seconds ) {
+	std::vector<BroanField_t> vecFields;
+
+	ESP_LOGI("broan_control", "Set turbo duration: %u s", seconds);
+
+	// Matches the exact wire format captured from the wall controller for 1h/2h/4h:
+	// a single write frame containing TurboDuration followed by FanMode=Turbo.
+	vecFields.push_back( m_vecFields[TurboDuration].copyForUpdate( seconds ) );
+	vecFields.push_back( m_vecFields[FanMode].copyForUpdate( (uint8_t)BroanFanMode::Turbo ) );
+
+	m_vecFields[TurboDuration].markDirty();
+	m_vecFields[FanMode].markDirty();
 
 	writeRegisters( vecFields );
 }

@@ -7,12 +7,16 @@ from esphome.const import (
     DEVICE_CLASS_POWER ,
     ENTITY_CATEGORY_DIAGNOSTIC,
     DEVICE_CLASS_TEMPERATURE,
+    DEVICE_CLASS_HUMIDITY,
     ICON_POWER,
     ICON_THERMOMETER,
     ICON_AIR_FILTER,
     ICON_FAN,
+    ICON_WATER,
+    ICON_TIMER,
     UNIT_WATT,
     UNIT_CELSIUS,
+    UNIT_PERCENT,
 )
 
 CONF_FILTER_LIFE = "filter_life"
@@ -21,10 +25,14 @@ CONF_SUPPLY_CFM = "supply_fan_cfm"
 CONF_EXHAUST_CFM = "exhaust_fan_cfm"
 CONF_SUPPLY_RPM = "supply_fan_rpm"
 CONF_EXHAUST_RPM = "exhaust_fan_rpm"
+CONF_INDOOR_TEMPERATURE = "indoor_temperature"
+CONF_INDOOR_HUMIDITY = "indoor_humidity"
+CONF_TURBO_REMAINING = "turbo_remaining"
 
 UNIT_CFM = "CFM"
 UNIT_RPM = "RPM"
 UNIT_DAY = "d"
+UNIT_MINUTE = "min"
 
 from . import CONF_BROAN_ID, BroanComponent
 
@@ -48,6 +56,22 @@ CONFIG_SCHEMA = cv.Schema(
             icon=ICON_THERMOMETER,
             unit_of_measurement=UNIT_CELSIUS,
         ),
+        # Indoor temperature/humidity. The ERV expects these on the bus, but once the
+        # ESP32 is the sole controller there's no physical wall controller left to
+        # supply them - you provide them yourself (a Home Assistant sensor, a probe
+        # wired to the ESP32, etc) via setCurrentTemperature()/setCurrentHumidity().
+        # These sensors simply republish whatever value you fed in, so it's visible/
+        # graphable in HA without a second source of truth.
+        cv.Optional(CONF_INDOOR_TEMPERATURE): sensor.sensor_schema(
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            icon=ICON_THERMOMETER,
+            unit_of_measurement=UNIT_CELSIUS,
+        ),
+        cv.Optional(CONF_INDOOR_HUMIDITY): sensor.sensor_schema(
+            device_class=DEVICE_CLASS_HUMIDITY,
+            icon=ICON_WATER,
+            unit_of_measurement=UNIT_PERCENT,
+        ),
         cv.Optional(CONF_FILTER_LIFE): sensor.sensor_schema(
             icon=ICON_AIR_FILTER,
             unit_of_measurement=UNIT_DAY,
@@ -68,6 +92,12 @@ CONFIG_SCHEMA = cv.Schema(
             icon=ICON_FAN,
             unit_of_measurement=UNIT_RPM,
         ),
+        # Minutes remaining on the current Turbo boost. Only meaningful while
+        # fan_mode == "turbo"; reads 0 otherwise.
+        cv.Optional(CONF_TURBO_REMAINING): sensor.sensor_schema(
+            icon=ICON_TIMER,
+            unit_of_measurement=UNIT_MINUTE,
+        ),
     }
 )
 
@@ -84,6 +114,14 @@ async def to_code(config):
     if temperature_out_config := config.get(CONF_TEMPERATURE_OUT):
         sens = await sensor.new_sensor(temperature_out_config)
         cg.add(broan_component.set_temperature_out_sensor(sens))
+
+    if indoor_temperature_config := config.get(CONF_INDOOR_TEMPERATURE):
+        sens = await sensor.new_sensor(indoor_temperature_config)
+        cg.add(broan_component.set_indoor_temperature_sensor(sens))
+
+    if indoor_humidity_config := config.get(CONF_INDOOR_HUMIDITY):
+        sens = await sensor.new_sensor(indoor_humidity_config)
+        cg.add(broan_component.set_indoor_humidity_sensor(sens))
 
     if filter_life_config := config.get(CONF_FILTER_LIFE):
         sens = await sensor.new_sensor(filter_life_config)
@@ -104,3 +142,7 @@ async def to_code(config):
     if exhaust_rpm_config := config.get(CONF_EXHAUST_RPM):
         sens = await sensor.new_sensor(exhaust_rpm_config)
         cg.add(broan_component.set_exhaust_rpm_sensor(sens))
+
+    if turbo_remaining_config := config.get(CONF_TURBO_REMAINING):
+        sens = await sensor.new_sensor(turbo_remaining_config)
+        cg.add(broan_component.set_turbo_remaining_sensor(sens))

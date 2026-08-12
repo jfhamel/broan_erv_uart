@@ -310,6 +310,50 @@ void BroanComponent::queueMessage(std::vector<uint8_t>& message)
 }
 
 
+// Used for the fan_mode select's displayed state (register 00:20 / commanded mode).
+// Keeps full granularity since this reflects exactly what was written to the ERV.
+std::string BroanComponent::fanModeToString( uint8_t value )
+{
+	switch( value )
+	{
+		case BroanFanMode::Ovr: return "ovr";
+		case BroanFanMode::Intermittent: return "int";
+		case BroanFanMode::Min: return "min";
+		case BroanFanMode::Max: return "max";
+		case BroanFanMode::Manual: return "exchange";
+		case BroanFanMode::Turbo: return "turbo";
+		case BroanFanMode::Humidity: return "humidity";
+		case BroanFanMode::Away: return "absence";
+		case BroanFanMode::Smart: return "smart";
+		case BroanFanMode::RecirculateMin:
+		case BroanFanMode::RecirculateMed:
+		case BroanFanMode::Recirculate: return "recirculation";
+		default: return "off";
+	}
+}
+
+// Used for the current_mode status text sensor (register 02:20 / base mode). This
+// register never actually holds Turbo/Absence/Humidity/Ovr - those are overlays -
+// so it's collapsed to exactly the three states asked for: what the ERV's fans are
+// physically doing right now, regardless of which override (if any) is commanding it.
+std::string BroanComponent::baseModeToString( uint8_t value )
+{
+	switch( value )
+	{
+		case BroanFanMode::RecirculateMin:
+		case BroanFanMode::RecirculateMed:
+		case BroanFanMode::Recirculate:
+			return "recirculation";
+
+		case BroanFanMode::Off:
+			return "off";
+
+		default:
+			// Min / Max / Manual / Intermittent / Smart: all forms of fresh-air exchange.
+			return "exchange";
+	}
+}
+
 void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 {
     size_t i = 1;
@@ -342,6 +386,19 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 		if( oldVal == pField->m_value.m_nValue )
 			continue;
 
+		// Keep track of which speed family is active so setFanSpeed() knows how to
+		// interpret its 0-100% input, including when the ERV reverts on its own
+		// (Turbo timer expiring, Absence schedule, etc). Kept outside the ifdefs
+		// below so it still works even if the select/number platforms aren't used.
+		if( unField == BroanField::FanMode )
+		{
+			uint8_t val = pField->m_value.m_chValue;
+			if( val == BroanFanMode::Manual )
+				m_eSpeedFamily = BroanFanMode::Manual;
+			else if( val == BroanFanMode::Recirculate || val == BroanFanMode::RecirculateMin || val == BroanFanMode::RecirculateMed )
+				m_eSpeedFamily = BroanFanMode::Recirculate;
+		}
+
 		switch(unField)
 		{
 #ifdef USE_SELECT
@@ -350,22 +407,20 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !fan_mode_select_ )
 					continue;
 
-				std::string strMode;
-				switch( pField->m_value.m_chValue )
-				{
-					case BroanFanMode::Ovr: strMode = "ovr"; break;
-					case BroanFanMode::Intermittent: strMode = "int"; break;
-					case BroanFanMode::Min: strMode = "min"; break;
-					case BroanFanMode::Max: strMode = "max"; break;
-					case BroanFanMode::Manual: strMode = "manual"; break;
-					case BroanFanMode::Turbo: strMode = "turbo"; break;
-					case BroanFanMode::Humidity: strMode = "humidity"; break;
-					case BroanFanMode::Recirculate: strMode = "recirculate"; break;
+				fan_mode_select_->publish_state( fanModeToString( pField->m_value.m_chValue ) );
+			}
+			break;
+#endif
+#ifdef USE_TEXT_SENSOR
+			case BroanField::BaseMode:
+			{
+				// What the ERV is actually doing right now, independent of any
+				// override (Turbo/Absence/Humidity/Ovr) that might be commanded
+				// on top of it via FanMode/00:20.
+				if( !current_mode_text_sensor_ )
+					continue;
 
-					default: strMode = "off"; break;
-				}
-
-				fan_mode_select_->publish_state( strMode );
+				current_mode_text_sensor_->publish_state( baseModeToString( pField->m_value.m_chValue ) );
 			}
 			break;
 #endif
@@ -426,11 +481,21 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !temperature_out_sensor_ || std::isnan( pField->m_value.m_flValue ) )
 					continue;
 
-				temperature_out_sensor_->publish_state(pField->m_value.m_flValue);		
+				temperature_out_sensor_->publish_state(pField->m_value.m_flValue);
 			}
 			break;
 
-#endif	
+			case BroanField::TurboRemaining:
+			{
+				if( !turbo_remaining_sensor_ )
+					continue;
+
+				// Seconds -> minutes
+				turbo_remaining_sensor_->publish_state( pField->m_value.m_nValue / 60.f );
+			}
+			break;
+
+#endif
 #ifdef USE_NUMBER
 			case BroanField::TargetHumidityA:
 				if( !humidity_setpoint_number_ )

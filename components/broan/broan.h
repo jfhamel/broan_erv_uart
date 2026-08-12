@@ -16,6 +16,10 @@
 #include "esphome/components/switch/switch.h"
 #endif
 
+#ifdef USE_TEXT_SENSOR
+#include "esphome/components/text_sensor/text_sensor.h"
+#endif
+
 #include "esphome/components/uart/uart.h"
 
 
@@ -34,6 +38,11 @@ namespace broan {
 #define INVALID_FIELD 0xFFFFFF
 
 #define FILTER_LIFE_MAX 7884000
+
+// Turbo duration choices offered by the wall controller, in seconds.
+#define TURBO_DURATION_1H 3600
+#define TURBO_DURATION_2H 7200
+#define TURBO_DURATION_4H 14400
 
 //#define SCAN_UNKNOWN 1
 //#define LISTEN_ONLY 1
@@ -62,15 +71,21 @@ enum BroanFanMode
 {
 	Off = 0x01,
 	Ovr = 0x02,
+	// 0x03 ??
+	// 0x04 ??
+	RecirculateMin = 0x05,
+	Recirculate = 0x06,    // Recirculate Max - To be renamed
+	RecirculateMed = 0x07,
 	Intermittent = 0x08,
-	Recirculate = 0x06,
-	Min = 0x09,
-	Max = 0x0a,
-	Smart = 0x11,
-	Manual = 0x0b,
+	Min = 0x09,             // Continuous (exchange) Min - To be renamed
+	Max = 0x0a,             // Continuous (exchange) Max - To be renamed
+	Manual = 0x0b,          // Continuous (exchange), Med - To be renamed
 	Turbo = 0x0c,
-	Humidity = 0x0d,
-	Away = 0x0F, // "OTH", no idea what this actually does?
+	Humidity = 0x0d,        // Deshumidistat. ERV sets this itself once 0F:22=1 is written; never write it directly.
+	// 0x0e ??
+	Away = 0x0F,            // Absence (weekly presence schedule override)
+	// 0x10 ??
+	Smart = 0x11,
 };
 
 enum BroanField
@@ -81,8 +96,10 @@ enum BroanField
 	IntModeDuration,
 	TargetHumidityA, // Set both to same value per VTSPEEDW
 	TargetHumidityB,
+	TurboDuration,   // Write-only. Seconds. Written together with FanMode=Turbo in a single frame.
 
 	// Info
+	BaseMode,        // Read-only. What the ERV is actually doing underneath Turbo/Absence/Humidity/Ovr.
 	Uptime, // In seconds?
 	Wattage,
 	TemperatureIn,
@@ -91,6 +108,7 @@ enum BroanField
 	ExhaustCFM,
 	SupplyRPM,
 	ExhaustRPM,
+	TurboRemaining,  // Read-only. Seconds left on the current Turbo/boost timer (register 04:30).
 
 	// Speeds
 	CFMIn_Medium,
@@ -163,10 +181,18 @@ class BroanComponent : public Component, public uart::UARTDevice
 	SUB_SENSOR(exhaust_cfm)
 	SUB_SENSOR(supply_rpm)
 	SUB_SENSOR(exhaust_rpm)
+	SUB_SENSOR(indoor_temperature)
+	SUB_SENSOR(indoor_humidity)
+	SUB_SENSOR(turbo_remaining)
+#endif
+
+#ifdef USE_TEXT_SENSOR
+	SUB_TEXT_SENSOR(current_mode)
 #endif
 
 #ifdef USE_SELECT
 	SUB_SELECT(fan_mode)
+	SUB_SELECT(turbo_duration)
 #endif
 
 #ifdef USE_NUMBER
@@ -197,9 +223,10 @@ public:
 		{ 0x02, 0x22, BroanFieldType::Int, {0}, UPDATE_RATE_SLOW }, // INT mode on time (seconds, OFF time will be what remains of an hour)
 		{ 0x0C, 0x22, BroanFieldType::Float, {0}, UPDATE_RATE_SLOW }, // Target humidity?
 		{ 0x0A, 0x22, BroanFieldType::Float, {0}, UPDATE_RATE_SLOW }, // Target humidity? (These are set together)
-
+		{ 0x00, 0x22, BroanFieldType::Int, {0}, UPDATE_RATE_NEVER }, // TurboDuration (seconds). Write-only: not part of the normal poll loop.
 
 		// Info
+		{ 0x02, 0x20, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // BaseMode
 		{ 0x14, 0x00, BroanFieldType::Int, {0}, UPDATE_RATE_SLOW }, // Uptime (Seconds)
 		{ 0x23, 0x50, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // Power draw (Watts)
 		{ 0x01, 0xE0, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // Temperature sensor (In)
@@ -208,6 +235,7 @@ public:
 		{ 0x06, 0x10, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // Exhaust CFM
 		{ 0x03, 0x10, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // Intake RPM
 		{ 0x04, 0x10, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // Exhaust RPM
+		{ 0x04, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // TurboRemaining (seconds)
 
 		// Speeds
 		{ 0x06, 0x22, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // MED target CFM in.
@@ -233,8 +261,8 @@ public:
 
 /*
 		// Unknown fields scanned by the VTSPEEDW
-		{ 0x02, 0x30, BroanFieldType::Byte, {0}, UPDATE_RATE_SLOW }, // Unknown. 1. Set to 0 in TURBO mode
-		{ 0x0A, 0x22, BroanFieldType::Float, {0} }, // Unknown. 40 / 00002042
+		{ 0x02, 0x30, BroanFieldType::Byte, {0} }, // Unknown. Toggles 01<->00 whenever an override (Turbo/Ovr/etc) starts.
+		{ 0x07, 0x20, BroanFieldType::Byte, {0} }, // Unknown. Toggles alongside 02:30 - looks like an override-type indicator (differs per override: Turbo vs Ovr vs ...).
 		{ 0x0E, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 1 / 01
 		{ 0x0C, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 1 / 01
 		{ 0x0B, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 1 / 01
@@ -245,13 +273,13 @@ public:
 		{ 0x06, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 0 / 00
 		{ 0x05, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 0 / 00
 		{ 0x04, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 0 / 00
-		{ 0x02, 0x20, BroanFieldType::Byte, {0} }, // Unknown. Set to 8 when in INT mode.
 		{ 0x17, 0x00, BroanFieldType::Int, {0} }, // Unknown. NaN / ffffffff
 		{ 0x00, 0x30, BroanFieldType::Byte, {0} }, // Unknown. 0 / 00
-		{ 0x00, 0x22, BroanFieldType::Int, {0} }, // Unknown. 14400 / 40380000
+		{ 0x03, 0x30, BroanFieldType::Int, {0} }, // Bathroom (Ovr) boost countdown, seconds. Same shape as 04:30 but for the OVR mode. Read-only.
 		{ 0x07, 0x50, BroanFieldType::Int, {0} }, // Unknown. VTSPEEDW often sets this to -1
 		{ 0x03, 0x20, BroanFieldType::Byte, {0} }, // Unknown. Set to 0 when entering INT mode
 		{ 0x08, 0x20, BroanFieldType::Byte, {0} }, // Unknown. Set to 0 when entering SMART mode, set to 1 in continuous modes.
+		{ 0x10, 0x22, BroanFieldType::Byte, {0} }, // Unknown. Written alongside 0F:22 when enabling Humidity control, always seen as 00 so far.
 */
 	};
 
@@ -273,7 +301,9 @@ public:
 	void setHumidityControl( bool enable );
 	void setHumiditySetpoint( float humidity );
 	void setCurrentHumidity( float humidity );
+	void setCurrentTemperature( float temperature );
 	void setIntermittentPeriod( uint32_t period );
+	void setTurboDuration( uint32_t seconds );
 
 private:
 
@@ -281,6 +311,10 @@ private:
 	uint32_t m_unLastHeartbeat = 0; // Next time to send heartbeat
 
 	bool m_bERVReady = false;
+
+	// Tracks which top-level family (exchange vs recirculation) setFanSpeed() should
+	// apply to, since the underlying protocol handles them very differently.
+	BroanFanMode m_eSpeedFamily = BroanFanMode::Manual;
 
 #ifdef SCAN_UNKNOWN
 	// Field scanner
@@ -311,6 +345,9 @@ private:
 	void runTasks();
 	void parseBroanFields(const std::vector<uint8_t>& message);
 	void writeRegisters( const std::vector<BroanField_t> &values );
+
+	std::string fanModeToString( uint8_t value );
+	std::string baseModeToString( uint8_t value );
 
 	float remap(float flIn, float flInMin, float flInMax, float flOutMin, float flOutMax) {
   		return (flIn - flInMin) * (flOutMax - flOutMin) / (flInMax - flInMin) + flOutMin;
