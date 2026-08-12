@@ -8,8 +8,9 @@ reverse-engineering documenté dans `broan-erv-protocole.md`.
 | Entité | Type | Description |
 |---|---|---|
 | `fan_mode` | select | **Changé.** Options: `off`, `smart`, `intermittent`, `exchange`, `recirculation`, `absence`. `turbo` retiré d'ici (voir `turbo_duration`). `min`/`max`/`manual`/`recirculate`/`humidity`/`ovr` retirés de la liste sélectionnable.|
+| `recirculation_speed` | select *(nouveau)* | Options `min`/`med`/`max`. Choisir une valeur active la recirculation à ce palier — confirmé par capture qu'il n'y a que ces trois paliers fixes, aucune vitesse continue possible (voir note ci-dessous). |
 | `turbo_duration` | select *(nouveau)* | Options `1h`/`2h`/`4h`. Sélectionner une durée active le Turbo — reproduit exactement la trame combinée (durée + mode) observée depuis le contrôleur mural. |
-| `fan_speed` | number | **Comportement changé.** Vitesse continue (0-100% → CFM min-max) en mode `exchange` *et* `recirculation` — même mécanisme d'écriture pour les deux familles. Non confirmé par capture pour `recirculation` (voir note ci-dessous). |
+| `fan_speed` | number | Vitesse continue (0-100% → CFM min-max), **applicable uniquement en mode `exchange`**. Ne s'applique plus à `recirculation` — voir `recirculation_speed`. |
 | `current_mode` | text_sensor *(nouveau)* | `exchange` / `recirculation` / `off` — ce que l'ERV fait réellement, indépendamment d'un override (Turbo/Absence/Deshumidistat) actif par-dessus. |
 | `indoor_temperature` | sensor *(nouveau)* | Republie la température envoyée via `setCurrentTemperature()`. |
 | `indoor_humidity` | sensor *(nouveau)* | Republie l'humidité envoyée via `setCurrentHumidity()`. |
@@ -44,7 +45,7 @@ reverse-engineering documenté dans `broan-erv-protocole.md`.
 
 ## Points à valider / limitations connues
 
-1. **Vitesse variable en recirculation — hypothèse non confirmée par capture, mais implémentée sur demande.** Le mode `exchange`/Manual (`0x0B`) fonctionne en continu parce qu'on écrit directement les registres CFM cible (`06:22`/`08:22`) sur le bus — le contrôleur physique ne le fait jamais lui-même, mais l'ERV accepte l'écriture. La recirculation utilise maintenant exactement le même mécanisme, sur l'hypothèse que ces registres sont une cible générique et non quelque chose de propre au mode continu. **À valider avec les capteurs `supply_fan_cfm`/`exhaust_fan_cfm`** : si le débit réel suit la roulette en recirculation, c'est confirmé; sinon l'ERV ignore probablement l'écriture et il faudra revenir à un choix à 3 paliers fixes.
+1. **Vitesse variable en recirculation — testé et infirmé.** Écrire une cible CFM personnalisée dans `06:22`/`08:22` pendant la recirculation n'a **aucun effet** sur le débit d'air réel (confirmé par capture : `supply_fan_cfm` restait figé à 65 CFM peu importe la valeur envoyée). Contrairement à `exchange`/Manual (`0x0B`), ce n'est donc pas une cible générique réutilisable. Recirculation n'a que 3 paliers fixes, exposés via le nouveau select `recirculation_speed`.
 2. **Annulation du Turbo/Absence par le `fan_mode` select non testée.** On sait que le Turbo se termine seul (minuterie à zéro) et qu'on peut le déclencher, mais on n'a jamais capturé une annulation manuelle explicite depuis le contrôleur mural. Le code suppose qu'écrire un nouveau `FanMode` interrompt proprement un override en cours — logique, mais pas vérifié par capture.
 3. **`Ovr` (bouton salle de bain) reste volontairement en lecture seule** — jamais exposé dans `fan_mode`, conformément à ta décision (bornes OVR à contacts secs, pas de déclenchement possible ni voulu depuis HA).
 4. Le second drapeau du Deshumidistat (`10:22`, toujours vu à `00`) n'est pas exposé — rôle encore inconnu.

@@ -191,6 +191,7 @@ class BroanComponent : public Component, public uart::UARTDevice
 #ifdef USE_SELECT
 	SUB_SELECT(fan_mode)
 	SUB_SELECT(turbo_duration)
+	SUB_SELECT(recirculation_speed)
 #endif
 
 #ifdef USE_NUMBER
@@ -302,6 +303,7 @@ public:
 	void setCurrentTemperature( float temperature );
 	void setIntermittentPeriod( uint32_t period );
 	void setTurboDuration( uint32_t seconds );
+	void setRecirculationSpeed( std::string speed );
 
 private:
 

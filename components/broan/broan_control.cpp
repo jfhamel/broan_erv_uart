@@ -21,11 +21,7 @@ void BroanComponent::setFanMode( std::string mode )
 		m_eSpeedFamily = BroanFanMode::Manual;
 	}
 	else if( mode == "recirculation" )
-	{
-		// Defaults to Max; use the fan_speed number to pick a level.
-		value = BroanFanMode::Recirculate;
-		m_eSpeedFamily = BroanFanMode::Recirculate;
-	}
+		value = BroanFanMode::Recirculate; // Max. Use recirculation_speed for min/med.
 	else if( mode == "absence" )
 		value = BroanFanMode::Away;
 	else
@@ -43,22 +39,10 @@ void BroanComponent::setFanMode( std::string mode )
 
 void BroanComponent::setFanSpeed( float input )
 {
-	// Continuous exchange (Manual/0x0B) is confirmed by capture: the physical wall
+	// Continuous exchange (Manual/0x0B): confirmed by capture. The physical wall
 	// controller never offers this, but the ERV honors any CFM target you write
 	// into 06:22/08:22 while sitting in that mode.
-	//
-	// Recirculation (Recirculate/RecirculateMin/RecirculateMed) uses the exact same
-	// mechanism here, on the assumption that 06:22/08:22 is a general "current speed
-	// target" the ERV applies whenever you're in an adjustable tier, not something
-	// tied specifically to continuous exchange. This has NOT been confirmed by
-	// capture - verify with the supply/exhaust CFM sensors that real airflow
-	// actually follows the slider while in recirculation. If it turns out the ERV
-	// ignores this and stays pinned to the nearest fixed step, this will need to
-	// go back to writing FanMode directly to one of the three discrete values.
-	if( m_eSpeedFamily == BroanFanMode::Manual ||
-	    m_eSpeedFamily == BroanFanMode::Recirculate ||
-	    m_eSpeedFamily == BroanFanMode::RecirculateMin ||
-	    m_eSpeedFamily == BroanFanMode::RecirculateMed )
+	if( m_eSpeedFamily == BroanFanMode::Manual )
 	{
 		float flMin = m_vecFields[CFMIn_Min].m_value.m_flValue;
 		float flMax = m_vecFields[CFMIn_Max].m_value.m_flValue;
@@ -81,7 +65,27 @@ void BroanComponent::setFanSpeed( float input )
 		return;
 	}
 
-	ESP_LOGW("broan","setFanSpeed() only applies in 'exchange' or 'recirculation' modes");
+	ESP_LOGW("broan","setFanSpeed() only applies in 'exchange' mode. Use recirculation_speed for recirculation.");
+}
+
+void BroanComponent::setRecirculationSpeed( std::string speed )
+{
+	// CONFIRMED BY CAPTURE (not a hypothesis): writing a custom target into
+	// 06:22/08:22 while in recirculation has no effect on real airflow - the ERV
+	// stays pinned wherever it was regardless of the value sent. Recirculation
+	// genuinely only has these three fixed steps; unlike exchange there is no
+	// way to get anything finer than this via RS-485.
+	uint8_t value = BroanFanMode::Recirculate; // max
+
+	if( speed == "min" )
+		value = BroanFanMode::RecirculateMin;
+	else if( speed == "med" )
+		value = BroanFanMode::RecirculateMed;
+
+	std::vector<BroanField_t> vecFields;
+	vecFields.push_back( m_vecFields[FanMode].copyForUpdate( value ) );
+	m_vecFields[FanMode].markDirty();
+	writeRegisters( vecFields );
 }
 
 

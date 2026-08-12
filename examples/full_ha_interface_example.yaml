@@ -22,6 +22,8 @@ select:
       name: "Mode de ventilation" # off / smart / intermittent / exchange / recirculation / absence
     turbo_duration:
       name: "Durée du Turbo"      # 1h / 2h / 4h - sélectionner active le Turbo
+    recirculation_speed:
+      name: "Vitesse en recirculation" # min / med / max - seuls paliers possibles
 
 number:
   - platform: broan
