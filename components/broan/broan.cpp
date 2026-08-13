@@ -409,7 +409,16 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				uint8_t val = pField->m_value.m_chValue;
 
 #ifdef USE_SELECT
-				if( fan_mode_select_ )
+				// fan_mode's declared options don't include turbo/humidity/ovr -
+				// those are exposed separately (turbo switch, override_state text
+				// sensor). Publishing one of them here would be rejected by
+				// select::publish_state() as an invalid option (logged as an
+				// error) since it validates against the declared option list.
+				// Simplest fix: only publish values that are actually selectable.
+				if( fan_mode_select_ &&
+				    val != BroanFanMode::Turbo &&
+				    val != BroanFanMode::Humidity &&
+				    val != BroanFanMode::Ovr )
 					fan_mode_select_->publish_state( fanModeToString( val ) );
 #endif
 
