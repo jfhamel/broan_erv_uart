@@ -30,6 +30,7 @@ void BroanComponent::setFanMode( std::string mode )
 	else
 		value = BroanFanMode::Off;
 
+	ESP_LOGI("broan_control", "Set fan mode: %s (%02X)", mode.c_str(), value);
 
 	std::vector<BroanField_t> vecFields;
 	vecFields.push_back( m_vecFields[FanMode].copyForUpdate( value ) );
@@ -66,6 +67,8 @@ void BroanComponent::setFanSpeed( float input )
 			return;
 		}
 		float value = remap( input, 0.f, 100.f, flMin, flMax );
+
+		ESP_LOGI("broan_control", "Set fan speed (exchange): %.0f%% -> %.1f CFM", input, value);
 
 		std::vector<BroanField_t> vecFields;
 
@@ -110,6 +113,8 @@ void BroanComponent::setRecirculationSpeed( float percent )
 	else if( percent < 67.f )
 		value = BroanFanMode::RecirculateMed;
 
+	ESP_LOGI("broan_control", "Set recirculation speed: %.0f%% -> %02X", percent, value);
+
 	std::vector<BroanField_t> vecFields;
 	vecFields.push_back( m_vecFields[FanMode].copyForUpdate( value ) );
 	m_vecFields[FanMode].markDirty();
@@ -121,6 +126,7 @@ void BroanComponent::setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, 
 {
 	std::vector<BroanField_t> vecFields;
 
+	ESP_LOGI("broan_control", "Set fan speed CFM limit: mode %02X, direction %02X, %.1f CFM", mode, direction, flTargetCFM);
 
 	switch( mode )
 	{
@@ -158,6 +164,8 @@ void BroanComponent::resetFilter()
 	uint32_t unNewFilterLife = FILTER_LIFE_MAX;
 	uint8_t unFilterReset = 0;
 
+	ESP_LOGI("broan_control", "Reset filter life to %u s", unNewFilterLife);
+
 	vecFields.push_back( m_vecFields[FilterLife].copyForUpdate( unNewFilterLife ) );
 	vecFields.push_back( m_vecFields[FilterReset].copyForUpdate( unFilterReset ) );
 
@@ -176,6 +184,8 @@ void BroanComponent::setHumidityControl( bool enable ) {
 		value = 0x01;
 	}
 
+	ESP_LOGI("broan_control", "Set humidity control: %s", enable ? "ON" : "OFF");
+
 	vecFields.push_back( m_vecFields[HumidityControl].copyForUpdate( value ) );
 
 	m_vecFields[HumidityControl].markDirty();
@@ -185,6 +195,8 @@ void BroanComponent::setHumidityControl( bool enable ) {
 
 void BroanComponent::setHumiditySetpoint( float humidity ) {
 	std::vector<BroanField_t> vecFields;
+
+	ESP_LOGI("broan_control", "Set humidity setpoint: %0.1f%%", humidity);
 
 	vecFields.push_back( m_vecFields[TargetHumidityA].copyForUpdate( humidity ) );
 	vecFields.push_back( m_vecFields[TargetHumidityB].copyForUpdate( humidity ) );
@@ -242,10 +254,7 @@ void BroanComponent::setCurrentTemperature( float temperature ) {
 void BroanComponent::setIntermittentPeriod( uint32_t period ) {
 	std::vector<BroanField_t> vecFields;
 
-	// S -> MS
-	//period *= 1000;
-  
-	ESP_LOGI("broan_control", "Set int period: %i", period);
+	ESP_LOGI("broan_control", "Set int period: %u s", period);
 
 	vecFields.push_back( m_vecFields[IntModeDuration].copyForUpdate( period ) );
 	m_vecFields[IntModeDuration].markDirty();
@@ -310,6 +319,8 @@ void BroanComponent::startTurbo()
 		return;
 	}
 
+	// setTurboDuration() already logs the resulting action - no separate log here
+	// to avoid a duplicate message right above it.
 	setTurboDuration( (uint32_t)( flMinutes * 60.f ) );
 }
 

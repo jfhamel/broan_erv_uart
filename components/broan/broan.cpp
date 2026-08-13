@@ -576,7 +576,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !intermittent_period_number_ )
 					continue;
 
-				intermittent_period_number_->publish_state(pField->m_value.m_nValue /* / 1000 */ );
+				intermittent_period_number_->publish_state(pField->m_value.m_nValue);
 			break;
 #endif
 #ifdef USE_SWITCH
@@ -592,16 +592,16 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 		switch( pField->m_nType )
 		{
 			case BroanFieldType::Byte:
-				ESP_LOGD("broan","%02X%02X is now Byte %02X", nOpcodeHigh, nOpcodeLow, pField->m_value.m_chValue );
+				ESP_LOGVV("broan","%02X%02X is now Byte %02X", nOpcodeHigh, nOpcodeLow, pField->m_value.m_chValue );
 				break;
 			case BroanFieldType::Int:
-				ESP_LOGD("broan","%02X%02X is now Int %i", nOpcodeHigh, nOpcodeLow, pField->m_value.m_nValue );
+				ESP_LOGVV("broan","%02X%02X is now Int %i", nOpcodeHigh, nOpcodeLow, pField->m_value.m_nValue );
 				break;
 			case BroanFieldType::Float:
-				ESP_LOGD("broan","%02X%02X is now Float %f", nOpcodeHigh, nOpcodeLow, pField->m_value.m_flValue );
+				ESP_LOGVV("broan","%02X%02X is now Float %f", nOpcodeHigh, nOpcodeLow, pField->m_value.m_flValue );
 				break;
 			case BroanFieldType::Void:
-				ESP_LOGD("broan","%02X%02X is not set", nOpcodeHigh, nOpcodeLow );
+				ESP_LOGVV("broan","%02X%02X is not set", nOpcodeHigh, nOpcodeLow );
 				break;
 		}
     }
@@ -624,11 +624,11 @@ void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLo
 
 
 			if( len == 4)
-				ESP_LOGD("broan","%02X%02X field is unmapped. Value: %f / %i -->  %f / %i", nOpcodeHigh, nOpcodeLow,
+				ESP_LOGVV("broan","%02X%02X field is unmapped. Value: %f / %i -->  %f / %i", nOpcodeHigh, nOpcodeLow,
 					copy.m_value.m_flValue, copy.m_value.m_nValue,
 					m_vecFieldData[kv].m_value.m_flValue, m_vecFieldData[kv].m_value.m_nValue ) ;
 			else if (len == 1)
-				ESP_LOGD("broan","%02X%02X field is unmapped. Value: %f / %i -->  %f / %i", nOpcodeHigh, nOpcodeLow,
+				ESP_LOGVV("broan","%02X%02X field is unmapped. Value: %f / %i -->  %f / %i", nOpcodeHigh, nOpcodeLow,
 					copy.m_value.m_flValue, copy.m_value.m_nValue,
 					m_vecFieldData[kv].m_value.m_flValue, m_vecFieldData[kv].m_value.m_nValue ) ;
 		}
@@ -646,11 +646,11 @@ void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLo
 
 
 		if( len == 4)
-			ESP_LOGD("broan","%02X%02X field is unmapped. Value: %f / %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_flValue, newField.m_value.m_nValue );
+			ESP_LOGVV("broan","%02X%02X field is unmapped. Value: %f / %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_flValue, newField.m_value.m_nValue );
 		else if( len == 1 )
-			ESP_LOGD("broan","%02X%02X field is unmapped. Value: %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_chValue);
+			ESP_LOGVV("broan","%02X%02X field is unmapped. Value: %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_chValue);
 		else
-			ESP_LOGD("broan","%02X%02X has unhandled field length %i: %s", nOpcodeHigh, nOpcodeLow, len, format_hex_pretty(&message[i], len).c_str() );
+			ESP_LOGVV("broan","%02X%02X has unhandled field length %i: %s", nOpcodeHigh, nOpcodeLow, len, format_hex_pretty(&message[i], len).c_str() );
 #ifdef SCAN_UNKNOWN
 		m_vecFieldData[kv] = newField;
 #endif
