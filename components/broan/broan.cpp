@@ -759,6 +759,33 @@ void BroanComponent::runTasks()
 		queueMessage(vecRequest);
 	}
 
+	// Rediffuse humidité/température toutes les ~20.3s même si la valeur n'a pas
+	// changé, comme le fait le contrôleur mural physique (confirmé par capture).
+	// setCurrentHumidity()/setCurrentTemperature() repoussent déjà ce minuteur
+	// quand une vraie mise à jour arrive - ceci ne fait qu'assurer que l'ERV
+	// continue de recevoir un signal régulier même si le capteur source de HA
+	// ne change pas pendant un moment.
+	if( ( m_bHaveHumidity || m_bHaveTemperature ) && time - m_unLastEnvironmentBroadcast > ENVIRONMENT_BROADCAST_RATE )
+	{
+		m_unLastEnvironmentBroadcast = time;
+
+		std::vector<BroanField_t> vecFields;
+
+		if( m_bHaveHumidity )
+		{
+			vecFields.push_back( m_vecFields[ControllerHumidity].copyForUpdate( m_flLastHumidity ) );
+			m_vecFields[ControllerHumidity].markDirty();
+		}
+
+		if( m_bHaveTemperature )
+		{
+			vecFields.push_back( m_vecFields[ControllerTemperature].copyForUpdate( m_flLastTemperature ) );
+			m_vecFields[ControllerTemperature].markDirty();
+		}
+
+		writeRegisters( vecFields );
+	}
+
 #ifdef SCAN_UNKNOWN
 
 	if( m_nNextScan == 0 )

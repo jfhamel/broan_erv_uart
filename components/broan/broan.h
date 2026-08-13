@@ -34,6 +34,10 @@ namespace broan {
 #define UPDATE_RATE_SLOW 60000 // 1 minute
 #define UPDATE_RATE_NEVER 0xFFFFFFFF
 
+// Cadence observée du contrôleur mural pour la diffusion humidité/température
+// (04:50/05:50) - confirmée par capture, ~20.3s peu importe si la valeur a changé.
+#define ENVIRONMENT_BROADCAST_RATE 20300
+
 #define MAX_REQUEST_SIZE 10
 #define INVALID_FIELD 0xFFFFFF
 
@@ -316,6 +320,16 @@ private:
 
 	uint32_t m_nLastHadControl = 0;
 	uint32_t m_unLastHeartbeat = 0; // Next time to send heartbeat
+	uint32_t m_unLastEnvironmentBroadcast = 0; // Next time to re-send humidity/temperature
+
+	// Dernières valeurs fournies via setCurrentHumidity()/setCurrentTemperature(),
+	// re-diffusées périodiquement (voir runTasks()) même si elles n'ont pas changé,
+	// pour reproduire la cadence du contrôleur mural (~20.3s) plutôt que de ne
+	// dépendre que des mises à jour ponctuelles d'un capteur HA externe.
+	float m_flLastHumidity = 0.f;
+	float m_flLastTemperature = 0.f;
+	bool m_bHaveHumidity = false;
+	bool m_bHaveTemperature = false;
 
 	bool m_bERVReady = false;
 

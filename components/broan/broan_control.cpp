@@ -205,6 +205,12 @@ void BroanComponent::setCurrentHumidity( float humidity ) {
 
 	writeRegisters( vecFields );
 
+	// Mémorise pour la rediffusion périodique (voir runTasks()) et repousse le
+	// prochain envoi automatique puisqu'on vient d'en faire un.
+	m_flLastHumidity = humidity;
+	m_bHaveHumidity = true;
+	m_unLastEnvironmentBroadcast = millis();
+
 	// We already have the value in hand - no need to wait for a read-back that will
 	// never come (this register is write-only on the wire).
 #ifdef USE_SENSOR
@@ -222,6 +228,10 @@ void BroanComponent::setCurrentTemperature( float temperature ) {
 	m_vecFields[ControllerTemperature].markDirty();
 
 	writeRegisters( vecFields );
+
+	m_flLastTemperature = temperature;
+	m_bHaveTemperature = true;
+	m_unLastEnvironmentBroadcast = millis();
 
 #ifdef USE_SENSOR
 	if( indoor_temperature_sensor_ )
