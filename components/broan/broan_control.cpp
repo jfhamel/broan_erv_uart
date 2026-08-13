@@ -68,18 +68,18 @@ void BroanComponent::setFanSpeed( float input )
 	ESP_LOGW("broan","setFanSpeed() only applies in 'exchange' mode. Use recirculation_speed for recirculation.");
 }
 
-void BroanComponent::setRecirculationSpeed( std::string speed )
+void BroanComponent::setRecirculationSpeed( float percent )
 {
-	// CONFIRMED BY CAPTURE (not a hypothesis): writing a custom target into
-	// 06:22/08:22 while in recirculation has no effect on real airflow - the ERV
-	// stays pinned wherever it was regardless of the value sent. Recirculation
-	// genuinely only has these three fixed steps; unlike exchange there is no
-	// way to get anything finer than this via RS-485.
+	// CONFIRMED BY CAPTURE: writing a custom CFM target while in recirculation has
+	// no effect on real airflow - the ERV stays pinned wherever it was regardless
+	// of the value sent. Recirculation genuinely only has these three fixed steps.
+	// This takes a 0-100% input (matching the number's 3 fixed stops: 0/50/100)
+	// and maps it to the nearest of the three.
 	uint8_t value = BroanFanMode::Recirculate; // max
 
-	if( speed == "min" )
+	if( percent < 33.f )
 		value = BroanFanMode::RecirculateMin;
-	else if( speed == "med" )
+	else if( percent < 67.f )
 		value = BroanFanMode::RecirculateMed;
 
 	std::vector<BroanField_t> vecFields;
@@ -229,6 +229,50 @@ void BroanComponent::setTurboDuration( uint32_t seconds ) {
 	m_vecFields[FanMode].markDirty();
 
 	writeRegisters( vecFields );
+}
+
+void BroanComponent::cancelOverride()
+{
+	// Reads back whatever base mode (02:20) the ERV is actually running right now
+	// and writes it straight to FanMode (00:20) - exits Turbo/Absence/Humidity/Ovr
+	// unconditionally, regardless of what fan_mode's displayed state currently
+	// shows in HA. A select only fires when its displayed value changes; a button
+	// always fires on every press, so this is the reliable way to back out of an
+	// override when the dropdown is showing something stale.
+	uint8_t baseMode = m_vecFields[BaseMode].m_value.m_chValue;
+
+	ESP_LOGI("broan_control", "Cancel override: returning to base mode %02X", baseMode);
+
+	std::vector<BroanField_t> vecFields;
+	vecFields.push_back( m_vecFields[FanMode].copyForUpdate( baseMode ) );
+	m_vecFields[FanMode].markDirty();
+	writeRegisters( vecFields );
+}
+
+void BroanComponent::startTurbo()
+{
+	// Reads the desired duration directly from the turbo_duration number (minutes)
+	// - no separate "pending duration" state needed, its ->state IS the value to use.
+	float flMinutes = 60.f; // fallback if the number isn't configured in YAML
+
+#ifdef USE_NUMBER
+	if( turbo_duration_number_ )
+		flMinutes = turbo_duration_number_->state;
+#endif
+
+	if( flMinutes <= 0.f )
+	{
+		ESP_LOGW("broan_control", "Cannot start turbo: duration is 0 minutes. Set turbo_duration first.");
+#ifdef USE_SWITCH
+		// Flip the switch back off since we're not actually starting anything -
+		// otherwise it would show "on" for a turbo that never started.
+		if( turbo_switch_ )
+			turbo_switch_->publish_state( false );
+#endif
+		return;
+	}
+
+	setTurboDuration( (uint32_t)( flMinutes * 60.f ) );
 }
 
 }  // namespace broan

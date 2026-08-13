@@ -5,6 +5,7 @@ namespace broan {
 
 void FanSpeedNumber::control(float value)
 {
+	this->publish_state(value);
 	this->parent_->setFanSpeed( value );
 }
 

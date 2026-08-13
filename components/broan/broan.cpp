@@ -404,16 +404,48 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 
 		switch(unField)
 		{
-#ifdef USE_SELECT
 			case BroanField::FanMode:
 			{
-				if( !fan_mode_select_ )
-					continue;
+				uint8_t val = pField->m_value.m_chValue;
 
-				fan_mode_select_->publish_state( fanModeToString( pField->m_value.m_chValue ) );
+#ifdef USE_SELECT
+				if( fan_mode_select_ )
+					fan_mode_select_->publish_state( fanModeToString( val ) );
+#endif
+
+#ifdef USE_SWITCH
+				// The turbo switch reflects reality: on while Turbo is the active
+				// FanMode, off otherwise - including when the ERV reverts on its
+				// own once the timer runs out.
+				if( turbo_switch_ )
+					turbo_switch_->publish_state( val == BroanFanMode::Turbo );
+#endif
+
+#ifdef USE_TEXT_SENSOR
+				if( override_state_text_sensor_ )
+				{
+					std::string state = "none";
+					if( val == BroanFanMode::Turbo ) state = "turbo";
+					else if( val == BroanFanMode::Away ) state = "absence";
+					else if( val == BroanFanMode::Humidity ) state = "humidity";
+					else if( val == BroanFanMode::Ovr ) state = "ovr";
+					override_state_text_sensor_->publish_state( state );
+				}
+#endif
+
+#ifdef USE_SENSOR
+				if( override_remaining_sensor_ )
+				{
+					float remaining = 0.f;
+					if( val == BroanFanMode::Turbo )
+						remaining = m_vecFields[TurboRemaining].m_value.m_nValue / 60.f;
+					else if( val == BroanFanMode::Ovr )
+						remaining = m_vecFields[OvrRemaining].m_value.m_nValue / 60.f;
+					override_remaining_sensor_->publish_state( remaining );
+				}
+#endif
 			}
 			break;
-#endif
 #ifdef USE_TEXT_SENSOR
 			case BroanField::BaseMode:
 			{
@@ -490,11 +522,23 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 
 			case BroanField::TurboRemaining:
 			{
-				if( !turbo_remaining_sensor_ )
+				if( !override_remaining_sensor_ )
 					continue;
 
-				// Seconds -> minutes
-				turbo_remaining_sensor_->publish_state( pField->m_value.m_nValue / 60.f );
+				// Only publish if Turbo is the currently active override - avoids
+				// pushing a stale/irrelevant countdown if something else is active.
+				if( m_vecFields[FanMode].m_value.m_chValue == BroanFanMode::Turbo )
+					override_remaining_sensor_->publish_state( pField->m_value.m_nValue / 60.f );
+			}
+			break;
+
+			case BroanField::OvrRemaining:
+			{
+				if( !override_remaining_sensor_ )
+					continue;
+
+				if( m_vecFields[FanMode].m_value.m_chValue == BroanFanMode::Ovr )
+					override_remaining_sensor_->publish_state( pField->m_value.m_nValue / 60.f );
 			}
 			break;
 

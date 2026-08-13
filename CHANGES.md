@@ -3,54 +3,57 @@
 Résumé des changements par rapport au dépôt original de nspitko, basé sur le
 reverse-engineering documenté dans `broan-erv-protocole.md`.
 
-## Nouvelle interface Home Assistant
+## Interface Home Assistant (état actuel)
 
 | Entité | Type | Description |
 |---|---|---|
-| `fan_mode` | select | **Changé.** Options: `off`, `smart`, `intermittent`, `exchange`, `recirculation`, `absence`. `turbo` retiré d'ici (voir `turbo_duration`). `min`/`max`/`manual`/`recirculate`/`humidity`/`ovr` retirés de la liste sélectionnable.|
-| `recirculation_speed` | select *(nouveau)* | Options `min`/`med`/`max`. Choisir une valeur active la recirculation à ce palier — confirmé par capture qu'il n'y a que ces trois paliers fixes, aucune vitesse continue possible (voir note ci-dessous). |
-| `turbo_duration` | select *(nouveau)* | Options `1h`/`2h`/`4h`. Sélectionner une durée active le Turbo — reproduit exactement la trame combinée (durée + mode) observée depuis le contrôleur mural. |
-| `fan_speed` | number | Vitesse continue (0-100% → CFM min-max), **applicable uniquement en mode `exchange`**. Ne s'applique plus à `recirculation` — voir `recirculation_speed`. |
-| `current_mode` | text_sensor *(nouveau)* | `exchange` / `recirculation` / `off` — ce que l'ERV fait réellement, indépendamment d'un override (Turbo/Absence/Deshumidistat) actif par-dessus. |
-| `indoor_temperature` | sensor *(nouveau)* | Republie la température envoyée via `setCurrentTemperature()`. |
-| `indoor_humidity` | sensor *(nouveau)* | Republie l'humidité envoyée via `setCurrentHumidity()`. |
-| `turbo_remaining` | sensor *(nouveau)* | Minutes restantes au compte à rebours du Turbo (registre `04:30`). |
+| `fan_mode` | select | Options: `off`, `smart`, `intermittent`, `exchange`, `recirculation`, `absence`. `turbo` n'y est pas — voir le switch `turbo`. `recirculation` choisi ici = Max par défaut; voir `recirculation_speed` pour min/med. |
+| `turbo` | switch *(nouveau)* | ON démarre le Turbo (durée lue depuis `turbo_duration`), OFF l'annule. Se remet à OFF tout seul quand le Turbo se termine (minuterie à zéro ou changement de mode) — reflète l'état réel, ce n'est pas une simple bascule. |
+| `turbo_duration` | number *(nouveau, remplace le select)* | 0 à 240 minutes, pas de 15 (0-4h). Ajuster pendant que le Turbo tourne met à jour le compte à rebours en direct. À 0, démarrer le Turbo est refusé. |
+| `fan_speed` | number | Vitesse continue (0-100% → CFM min-max), **applicable uniquement en mode `exchange`**. |
+| `recirculation_speed` | number *(nouveau, remplace le select)* | 0-100%, pas de 50 (3 paliers fixes: 0/50/100% → min/med/max). Confirmé par capture : pas de vitesse continue possible en recirculation. |
+| `intermittent_period` | number | **Changé.** 10 à 50 minutes, pas de 5 (était 10-50000 secondes). Conversion minutes↔secondes gérée en interne. |
 | `humidity_control` (switch) + `humidity_setpoint` (number) | — | **Inchangés**, déjà corrects dans le dépôt d'origine. |
+| `current_mode` | text_sensor | `exchange` / `recirculation` / `off` — ce que l'ERV fait réellement (mode de base, `02:20`), indépendamment d'un override actif par-dessus. |
+| `override_state` | text_sensor *(nouveau)* | `turbo` / `absence` / `humidity` / `ovr` / `none` — quel override est actif, le cas échéant. Lecture seule. |
+| `override_remaining` | sensor *(nouveau, remplace `turbo_remaining`)* | Minutes restantes sur l'override actif (Turbo `04:30` ou Ovr `03:30`, unifié). Lecture seule, 0 si aucun override actif. |
+| `indoor_temperature` / `indoor_humidity` | sensor | Republient les valeurs fournies via `setCurrentTemperature()`/`setCurrentHumidity()` (à toi de les appeler avec un capteur externe — voir section suivante). |
+| `cancel_override` | button | Sort de Turbo/Absence/Deshumidistat en un clic (utile surtout pour Absence/Deshumidistat, qui n'ont pas de switch dédié comme Turbo). |
 | `power`, `filter_life`, `supply/exhaust_cfm`, `supply/exhaust_rpm`, `temperature` (ERV) | — | **Inchangés**. |
 
-## Changements côté code
+## Pourquoi le contrôleur mural ne peut pas fournir température/humidité
+
+Une fois l'ESP32 seul contrôleur sur le bus RS-485 (adresse `0x10`, codé en dur dans `broan.h`), il n'y a plus de contrôleur mural physique pour mesurer et transmettre ces valeurs à l'ERV. `setCurrentTemperature()`/`setCurrentHumidity()` existent pour ça : à appeler depuis ton YAML avec la valeur d'un autre instrument (capteur HA, sonde câblée à l'ESP32). Voir `full_ha_interface_example.yaml`.
+
+## Détails techniques
 
 - **`broan.h`**
-  - `BroanFanMode`: ajout de `RecirculateMin=0x05` et `RecirculateMed=0x07` (seul `Recirculate=0x06`/Max existait).
-  - `BroanField`: ajout de `TurboDuration` (`00:22`, écriture), `BaseMode` (`02:20`, lecture), `TurboRemaining` (`04:30`, lecture).
-  - Nouvelles méthodes publiques : `setCurrentTemperature()`, `setTurboDuration()`.
-  - Nouveau membre privé `m_eSpeedFamily` pour que `setFanSpeed()` sache s'il doit ajuster le CFM continu (`exchange`) ou choisir un palier (`recirculation`).
+  - `BroanFanMode`: `RecirculateMin=0x05`, `RecirculateMed=0x07` ajoutés (seul `Recirculate=0x06`/Max existait).
+  - `BroanField`: `TurboDuration` (`00:22`, écriture), `BaseMode` (`02:20`, lecture), `TurboRemaining` (`04:30`, lecture), `OvrRemaining` (`03:30`, lecture, réactivé depuis le bloc de champs inconnus commentés).
+  - Nouveau membre `m_eSpeedFamily` : suit si `exchange` est actif (`fan_speed` ne s'applique qu'à ce cas).
 - **`broan_control.cpp`**
-  - `setFanMode()` : nouvelle liste de chaînes (`smart`/`exchange`/`recirculation`/`absence`/`off`). `turbo` retiré (voir `setTurboDuration`).
-  - `setFanSpeed()` : branche maintenant sur `m_eSpeedFamily`.
-  - `setCurrentHumidity()` : publie maintenant directement vers `indoor_humidity` (pas besoin de lecture retour, le registre est écriture seule).
-  - **Nouveau** `setCurrentTemperature()` : symétrique à `setCurrentHumidity()`, écrit `05:50` et publie vers `indoor_temperature`.
-  - **Nouveau** `setTurboDuration()` : écrit `TurboDuration` + `FanMode=Turbo` dans un seul message, exactement comme la trame capturée du contrôleur mural.
+  - `setFanMode()`: chaînes `off`/`smart`/`intermittent`/`exchange`/`recirculation`/`absence`.
+  - `setRecirculationSpeed(float)`: 0-100% → l'un des 3 paliers fixes.
+  - `setCurrentTemperature()`/`setCurrentHumidity()`: publient directement vers `indoor_temperature`/`indoor_humidity` (pas de lecture retour nécessaire, registres écriture seule).
+  - `setTurboDuration()`: écrit durée + `FanMode=Turbo` en un seul message, comme la trame capturée du contrôleur mural.
+  - `startTurbo()` *(nouveau)*: lit `turbo_duration_number_->state`, refuse si 0.
+  - `cancelOverride()`: lit le mode de base réel (`02:20`) et le réécrit dans `FanMode`.
 - **`broan.cpp`**
-  - `fanModeToString()` : helper partagé pour l'affichage du `fan_mode` select.
-  - `baseModeToString()` *(nouveau)* : mappe `02:20` vers exactement 3 états pour `current_mode`.
-  - Nouveaux cas dans `parseBroanFields()` pour `BaseMode` et `TurboRemaining`.
-- **`select/`** : nouveau `TurboDurationSelect`. `select/__init__.py` mis à jour (nouvelle liste d'options + enregistrement du nouveau select).
-- **`sensor.py`** : ajout de `indoor_temperature`, `indoor_humidity`, `turbo_remaining`.
-- **`text_sensor.py`** *(nouveau fichier)* : `current_mode`.
-
-## Correction (après retour terrain)
-
-- **Régression corrigée : le mode `intermittent` avait disparu du `fan_mode` select.** Il avait été retiré par erreur en simplifiant la liste des modes. Le `intermittent_period` number (durée du cycle marche/arrêt) existait toujours mais était devenu inaccessible sans pouvoir sélectionner le mode lui-même. Réintégré.
+  - `fanModeToString()`/`baseModeToString()`: mappages distincts pour `fan_mode`/`override_state` vs `current_mode` (3 états seulement pour ce dernier).
+  - Cas `FanMode` regroupe maintenant 4 publications différentes (select, switch turbo, text_sensor override_state, sensor override_remaining) dans un seul bloc avec des `#ifdef` internes — un `switch` C++ ne permet pas plusieurs `case` avec la même étiquette.
+- **`select/`**: uniquement `fan_mode` désormais. `turbo_duration_select.*` et `recirculation_speed_select.*` supprimés (remplacés par des `number`).
+- **`number/`**: nouveaux `turbo_duration_number.*` et `recirculation_speed_number.*`. `intermittent_period_number.cpp` fait la conversion minutes→secondes.
+- **`switch/`**: nouveau `turbo_switch.*`.
+- **`sensor.py`**: `turbo_remaining` renommé `override_remaining`, ajout `indoor_temperature`/`indoor_humidity`.
+- **`text_sensor.py`**: ajout `override_state` (en plus de `current_mode`).
 
 ## Points à valider / limitations connues
 
-1. **Vitesse variable en recirculation — testé et infirmé.** Écrire une cible CFM personnalisée dans `06:22`/`08:22` pendant la recirculation n'a **aucun effet** sur le débit d'air réel (confirmé par capture : `supply_fan_cfm` restait figé à 65 CFM peu importe la valeur envoyée). Contrairement à `exchange`/Manual (`0x0B`), ce n'est donc pas une cible générique réutilisable. Recirculation n'a que 3 paliers fixes, exposés via le nouveau select `recirculation_speed`.
-2. **Annulation du Turbo/Absence par le `fan_mode` select non testée.** On sait que le Turbo se termine seul (minuterie à zéro) et qu'on peut le déclencher, mais on n'a jamais capturé une annulation manuelle explicite depuis le contrôleur mural. Le code suppose qu'écrire un nouveau `FanMode` interrompt proprement un override en cours — logique, mais pas vérifié par capture.
-3. **`Ovr` (bouton salle de bain) reste volontairement en lecture seule** — jamais exposé dans `fan_mode`, conformément à ta décision (bornes OVR à contacts secs, pas de déclenchement possible ni voulu depuis HA).
+1. **Vitesse variable en recirculation — testé et infirmé.** Écrire une cible CFM personnalisée dans `06:22`/`08:22` pendant la recirculation n'a **aucun effet** sur le débit d'air réel (confirmé par capture : `supply_fan_cfm` restait figé à 65 CFM peu importe la valeur envoyée). C'est pourquoi `recirculation_speed` n'a que 3 paliers fixes plutôt qu'une vraie plage continue.
+2. **Annulation d'un override par `cancelOverride()`/`startTurbo()` non testée en conditions réelles.** La logique suppose qu'écrire un nouveau `FanMode` interrompt proprement un override en cours — cohérent avec le protocole, mais jamais confirmé par capture d'une annulation manuelle depuis le contrôleur mural.
+3. **`Ovr` (bouton salle de bain) reste en lecture seule** — jamais exposé dans `fan_mode` ni déclenchable (bornes OVR à contacts secs sur l'ERV). Son compte à rebours (`03:30`) est lu et alimente `override_remaining`/`override_state` quand actif, comme demandé.
 4. Le second drapeau du Deshumidistat (`10:22`, toujours vu à `00`) n'est pas exposé — rôle encore inconnu.
-5. **`indoor_temperature`/`indoor_humidity` ne viennent pas du contrôleur mural.** Une fois l'ESP32 seul contrôleur sur le bus, il n'y a plus de contrôleur mural physique pour fournir ces valeurs à l'ERV — c'est pourquoi `setCurrentTemperature()`/`setCurrentHumidity()` existent : à toi de les appeler avec la valeur d'un autre instrument (capteur HA, sonde câblée à l'ESP32, etc), configuré dans ton YAML. Voir `full_ha_interface_example.yaml`.
 
 ## Fichiers non modifiés
 
-`__init__.py`, `button/`, `number/fan_speed_number.*`, `number/humidity_setpoint_number.*`, `number/intermittent_period_number.*`, `number/__init__.py`, `switch/`, `select/fan_mode_select.*` — inchangés (la logique existante convenait déjà).
+`__init__.py`, `button/filter_reset_button.*`, `number/fan_speed_number.h`, `number/humidity_setpoint_number.*`, `switch/humidity_control_switch.*`, `select/fan_mode_select.*` — inchangés (la logique existante convenait déjà).

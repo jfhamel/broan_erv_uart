@@ -107,6 +107,7 @@ enum BroanField
 	SupplyRPM,
 	ExhaustRPM,
 	TurboRemaining,  // Read-only. Seconds left on the current Turbo/boost timer (register 04:30).
+	OvrRemaining,    // Read-only. Seconds left on the current bathroom (Ovr) boost timer (register 03:30).
 
 	// Speeds
 	CFMIn_Medium,
@@ -181,31 +182,34 @@ class BroanComponent : public Component, public uart::UARTDevice
 	SUB_SENSOR(exhaust_rpm)
 	SUB_SENSOR(indoor_temperature)
 	SUB_SENSOR(indoor_humidity)
-	SUB_SENSOR(turbo_remaining)
+	SUB_SENSOR(override_remaining)
 #endif
 
 #ifdef USE_TEXT_SENSOR
 	SUB_TEXT_SENSOR(current_mode)
+	SUB_TEXT_SENSOR(override_state)
 #endif
 
 #ifdef USE_SELECT
 	SUB_SELECT(fan_mode)
-	SUB_SELECT(turbo_duration)
-	SUB_SELECT(recirculation_speed)
 #endif
 
 #ifdef USE_NUMBER
 	SUB_NUMBER(fan_speed)
 	SUB_NUMBER(humidity_setpoint)
 	SUB_NUMBER(intermittent_period)
+	SUB_NUMBER(turbo_duration)
+	SUB_NUMBER(recirculation_speed)
 #endif
 
 #ifdef USE_BUTTON
   SUB_BUTTON(filter_reset)
+  SUB_BUTTON(cancel_override)
 #endif
 
 #ifdef USE_SWITCH
   SUB_SWITCH(humidity_control)
+  SUB_SWITCH(turbo)
 #endif
 
 public:
@@ -235,6 +239,7 @@ public:
 		{ 0x03, 0x10, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // Intake RPM
 		{ 0x04, 0x10, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // Exhaust RPM
 		{ 0x04, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // TurboRemaining (seconds)
+		{ 0x03, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // OvrRemaining (seconds) - bathroom (Ovr) boost countdown
 
 		// Speeds
 		{ 0x06, 0x22, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // MED target CFM in.
@@ -303,7 +308,9 @@ public:
 	void setCurrentTemperature( float temperature );
 	void setIntermittentPeriod( uint32_t period );
 	void setTurboDuration( uint32_t seconds );
-	void setRecirculationSpeed( std::string speed );
+	void setRecirculationSpeed( float percent );
+	void cancelOverride();
+	void startTurbo();
 
 private:
 

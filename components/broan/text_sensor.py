@@ -8,6 +8,7 @@ from . import CONF_BROAN_ID, BroanComponent
 DEPENDENCIES = ["broan"]
 
 CONF_CURRENT_MODE = "current_mode"
+CONF_OVERRIDE_STATE = "override_state"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -19,6 +20,12 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_CURRENT_MODE): text_sensor.text_sensor_schema(
             icon=ICON_FAN,
         ),
+        # Which timed/temporary override (if any) is currently layered on top of
+        # current_mode: "turbo", "absence", "humidity", "ovr", or "none". Read-only -
+        # pair with the override_remaining sensor for the countdown.
+        cv.Optional(CONF_OVERRIDE_STATE): text_sensor.text_sensor_schema(
+            icon="mdi:timer-alert",
+        ),
     }
 )
 
@@ -28,3 +35,7 @@ async def to_code(config):
     if current_mode_config := config.get(CONF_CURRENT_MODE):
         sens = await text_sensor.new_text_sensor(current_mode_config)
         cg.add(broan_component.set_current_mode_text_sensor(sens))
+
+    if override_state_config := config.get(CONF_OVERRIDE_STATE):
+        sens = await text_sensor.new_text_sensor(override_state_config)
+        cg.add(broan_component.set_override_state_text_sensor(sens))

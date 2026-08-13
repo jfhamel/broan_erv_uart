@@ -20,20 +20,11 @@ select:
   - platform: broan
     fan_mode:
       name: "Mode de ventilation" # off / smart / intermittent / exchange / recirculation / absence
-    turbo_duration:
-      name: "Durée du Turbo"      # 1h / 2h / 4h - sélectionner active le Turbo
-    recirculation_speed:
-      name: "Vitesse en recirculation" # min / med / max - seuls paliers possibles
-
-number:
-  - platform: broan
-    fan_speed:
-      name: "Vitesse"             # 0-100%, s'applique en mode exchange ou recirculation
-    humidity_setpoint:
-      name: "Seuil d'humidité cible"
 
 switch:
   - platform: broan
+    turbo:
+      name: "Turbo"               # ON démarre (durée = turbo_duration), OFF annule
     humidity_control:
       name: "Contrôle d'humidité"
       id: humcontrol
@@ -41,10 +32,25 @@ switch:
         then:
           lambda: id(mybroan).setCurrentHumidity(id(myhumidity).state);
 
+number:
+  - platform: broan
+    fan_speed:
+      name: "Vitesse (échange)"    # 0-100%, s'applique uniquement en mode exchange
+    recirculation_speed:
+      name: "Vitesse (recirculation)" # 0/50/100% -> min/med/max, 3 paliers fixes seulement
+    turbo_duration:
+      name: "Durée du Turbo"       # 0-240 min, pas de 15 (0-4h). 0 = ne démarre pas.
+    intermittent_period:
+      name: "Période Intermittent" # 10-50 min, pas de 5
+    humidity_setpoint:
+      name: "Seuil d'humidité cible"
+
 text_sensor:
   - platform: broan
     current_mode:
       name: "Ventilation en cours" # exchange / recirculation / off
+    override_state:
+      name: "Override actif"       # turbo / absence / humidity / ovr / none
 
 sensor:
   - platform: broan
@@ -64,8 +70,8 @@ sensor:
       name: "Vitesse moteur soufflage (RPM)"
     exhaust_fan_rpm:
       name: "Vitesse moteur extraction (RPM)"
-    turbo_remaining:
-      name: "Temps restant (Turbo)"
+    override_remaining:
+      name: "Temps restant (override)"
     indoor_temperature:
       name: "Température intérieure"
     indoor_humidity:
@@ -103,3 +109,5 @@ button:
   - platform: broan
     filter_reset:
       name: "Réinitialiser le filtre"
+    cancel_override:
+      name: "Annuler Absence/Deshumidistat" # Turbo a son propre switch pour ça
