@@ -21,7 +21,10 @@ void BroanComponent::setFanMode( std::string mode )
 		m_eSpeedFamily = BroanFanMode::Manual;
 	}
 	else if( mode == "recirculation" )
-		value = BroanFanMode::Recirculate; // Max. Use recirculation_speed for min/med.
+	{
+		value = BroanFanMode::Recirculate; // Max par défaut, ajusté ci-dessous si recirculation_speed est déjà réglée
+		m_eSpeedFamily = BroanFanMode::Recirculate;
+	}
 	else if( mode == "absence" )
 		value = BroanFanMode::Away;
 	else
@@ -35,6 +38,17 @@ void BroanComponent::setFanMode( std::string mode )
 
 	writeRegisters( vecFields );
 
+	// Applique tout de suite la vitesse déjà affichée dans HA plutôt que de
+	// laisser l'ERV sur une cible potentiellement périmée d'une session
+	// précédente. m_eSpeedFamily étant déjà à jour ci-dessus (synchrone), les
+	// garde-fous de setFanSpeed()/setRecirculationSpeed() laissent passer ces
+	// appels normalement.
+#ifdef USE_NUMBER
+	if( mode == "exchange" && fan_speed_number_ )
+		setFanSpeed( fan_speed_number_->state );
+	else if( mode == "recirculation" && recirculation_speed_number_ )
+		setRecirculationSpeed( recirculation_speed_number_->state );
+#endif
 }
 
 void BroanComponent::setFanSpeed( float input )
@@ -70,6 +84,20 @@ void BroanComponent::setFanSpeed( float input )
 
 void BroanComponent::setRecirculationSpeed( float percent )
 {
+	// Découplé du changement de mode: n'agit sur le bus que si on est déjà en
+	// recirculation (comme setFanSpeed() pour l'échange). Sinon, seule la valeur
+	// HA (publish_state, fait par RecirculationSpeedNumber::control()) est mise à
+	// jour - rien n'est envoyé à l'ERV, et le mode ne change pas.
+	// Note: on vérifie m_eSpeedFamily (mis à jour de façon synchrone dans
+	// setFanMode()) plutôt que m_vecFields[FanMode] directement, qui lui ne se
+	// met à jour qu'après relecture du bus - sinon, appeler cette fonction juste
+	// après un changement de mode verrait encore l'ancienne valeur.
+	if( m_eSpeedFamily != BroanFanMode::Recirculate )
+	{
+		ESP_LOGD("broan_control", "recirculation_speed changed while not in recirculation - not sent to the ERV");
+		return;
+	}
+
 	// CONFIRMED BY CAPTURE: writing a custom CFM target while in recirculation has
 	// no effect on real airflow - the ERV stays pinned wherever it was regardless
 	// of the value sent. Recirculation genuinely only has these three fixed steps.

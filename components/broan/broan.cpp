@@ -387,17 +387,17 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 			continue;
 
 		// Keep track of whether we're in continuous exchange (Manual/0x0B) so
-		// setFanSpeed() knows its 0-100% input is meaningful right now, including
-		// when the ERV reverts on its own (Turbo timer expiring, Absence schedule,
-		// etc). Kept outside the ifdefs below so it still works even if the
-		// select/number platforms aren't used. Recirculation isn't tracked here:
-		// confirmed by capture that it doesn't respond to a continuous CFM target
-		// the way exchange does (see setRecirculationSpeed() instead).
+		// setFanSpeed()/setRecirculationSpeed() know their 0-100% input is
+		// meaningful right now, including when the ERV reverts on its own (Turbo
+		// timer expiring, Absence schedule, etc). Kept outside the ifdefs below so
+		// it still works even if the select/number platforms aren't used.
 		if( unField == BroanField::FanMode )
 		{
 			uint8_t val = pField->m_value.m_chValue;
 			if( val == BroanFanMode::Manual )
 				m_eSpeedFamily = BroanFanMode::Manual;
+			else if( val == BroanFanMode::Recirculate || val == BroanFanMode::RecirculateMin || val == BroanFanMode::RecirculateMed )
+				m_eSpeedFamily = BroanFanMode::Recirculate;
 			else
 				m_eSpeedFamily = BroanFanMode::Off;
 		}
