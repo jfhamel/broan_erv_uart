@@ -332,26 +332,24 @@ std::string BroanComponent::fanModeToString( uint8_t value )
 	}
 }
 
-// Used for the current_mode status text sensor (register 02:20 / base mode). This
-// register never actually holds Turbo/Absence/Humidity/Ovr - those are overlays -
-// so it's collapsed to exactly the three states asked for: what the ERV's fans are
-// physically doing right now, regardless of which override (if any) is commanding it.
-std::string BroanComponent::baseModeToString( uint8_t value )
+// Used for the current_mode status text sensor. Confirmé par capture (2026-08-13):
+// 02:20 (l'ancienne source) ne bouge pas quand le mode Smart bascule en interne
+// entre échange et recirculation - seul 07:20 (VentilationState) le fait, et il
+// précède le débit d'air physique de plusieurs secondes. "off" reste déterminé via
+// FanMode (00:20), source fiable pour ce cas précis quel que soit le mode commandé.
+std::string BroanComponent::ventilationStateToString( uint8_t fanMode, uint8_t ventilationState )
 {
-	switch( value )
-	{
-		case BroanFanMode::RecirculateMin:
-		case BroanFanMode::RecirculateMed:
-		case BroanFanMode::Recirculate:
-			return "recirculation";
+	if( fanMode == BroanFanMode::Off )
+		return "off";
 
-		case BroanFanMode::Off:
-			return "off";
+	// La valeur confirmée pour la recirculation coïncide avec BroanFanMode::Recirculate
+	// (0x06) - probablement pas une coïncidence, mais on n'a pas encore confirmé si
+	// d'autres valeurs existent pour d'autres nuances. Tout le reste (dont la valeur
+	// "01" confirmée pour l'échange) est traité comme échange par défaut.
+	if( ventilationState == BroanFanMode::Recirculate )
+		return "recirculation";
 
-		default:
-			// Min / Max / Manual / Intermittent / Smart: all forms of fresh-air exchange.
-			return "exchange";
-	}
+	return "exchange";
 }
 
 void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
@@ -440,6 +438,16 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 					else if( val == BroanFanMode::Ovr ) state = "ovr";
 					override_state_text_sensor_->publish_state( state );
 				}
+
+				// current_mode dépend à la fois de FanMode (pour "off") et de
+				// VentilationState (pour échange/recirculation) - recalculer ici
+				// aussi, pas seulement dans le cas VentilationState ci-dessous,
+				// pour rester à jour quand on entre/sort du mode "off" par exemple.
+				if( current_mode_text_sensor_ )
+				{
+					uint8_t ventState = m_vecFields[VentilationState].m_value.m_chValue;
+					current_mode_text_sensor_->publish_state( ventilationStateToString( val, ventState ) );
+				}
 #endif
 
 #ifdef USE_SENSOR
@@ -455,19 +463,31 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 #endif
 			}
 			break;
-#ifdef USE_TEXT_SENSOR
-			case BroanField::BaseMode:
+			case BroanField::VentilationState:
 			{
-				// What the ERV is actually doing right now, independent of any
-				// override (Turbo/Absence/Humidity/Ovr) that might be commanded
-				// on top of it via FanMode/00:20.
-				if( !current_mode_text_sensor_ )
-					continue;
+				uint8_t fanMode = m_vecFields[FanMode].m_value.m_chValue;
+				uint8_t ventState = pField->m_value.m_chValue;
 
-				current_mode_text_sensor_->publish_state( baseModeToString( pField->m_value.m_chValue ) );
+#ifdef USE_TEXT_SENSOR
+				if( current_mode_text_sensor_ )
+					current_mode_text_sensor_->publish_state( ventilationStateToString( fanMode, ventState ) );
+#endif
+
+#ifdef USE_SENSOR
+				// Republie tout de suite la température extérieure (voir le cas
+				// TemperatureIn ci-dessous) au moment même du changement d'état,
+				// plutôt que d'attendre jusqu'à 10s le prochain cycle de lecture
+				// de 01:E0 pour refléter la bascule.
+				if( temperature_sensor_ )
+				{
+					if( ventState == BroanFanMode::Recirculate )
+						temperature_sensor_->publish_state(NAN);
+					else
+						temperature_sensor_->publish_state( m_vecFields[TemperatureIn].m_value.m_flValue );
+				}
+#endif
 			}
 			break;
-#endif
 #ifdef USE_SENSOR
 			case BroanField::Wattage:
 				if( !power_sensor_ )
@@ -488,7 +508,14 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !temperature_sensor_ )
 					continue;
 
-				temperature_sensor_->publish_state(pField->m_value.m_flValue);
+				// Recirculation: pas d'air extérieur admis, cette sonde ne mesure
+				// alors que de l'air recyclé/intérieur - valeur trompeuse si
+				// affichée comme "température extérieure". Publie NAN (= indisponible
+				// côté HA) plutôt que cette valeur non représentative.
+				if( m_vecFields[VentilationState].m_value.m_chValue == BroanFanMode::Recirculate )
+					temperature_sensor_->publish_state(NAN);
+				else
+					temperature_sensor_->publish_state(pField->m_value.m_flValue);
 			break;
 
 			case BroanField::SupplyCFM:
