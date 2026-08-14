@@ -48,7 +48,7 @@ namespace broan {
 #define TURBO_DURATION_2H 7200
 #define TURBO_DURATION_4H 14400
 
-//#define SCAN_UNKNOWN 1
+#define SCAN_UNKNOWN 1
 //#define LISTEN_ONLY 1
 
 template<typename T>
