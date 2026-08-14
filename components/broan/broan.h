@@ -113,6 +113,23 @@ enum BroanField
 	TurboRemaining,  // Read-only. Seconds left on the current Turbo/boost timer (register 04:30).
 	OvrRemaining,    // Read-only. Seconds left on the current bathroom (Ovr) boost timer (register 03:30).
 
+	// Candidats pour l'indicateur interne échange/recirculation du mode Smart
+	// (02:20/00:20 ne bougent pas quand Smart bascule en interne - le vrai
+	// contrôleur mural affiche pourtant cet état, donc il DOIT être transmis
+	// quelque part). Repris du bloc de champs jamais activés scannés par
+	// l'auteur d'origine (VTSPEEDW) - activement interrogés maintenant plutôt
+	// que de dépendre du scanner brute-force.
+	OverrideActiveFlag,   // 02:30. "Toggles 01<->00 whenever an override (Turbo/Ovr/etc) starts."
+	VentilationState,     // 07:20. Confirmé par capture (2026-08-13): reflète la décision
+	                      // interne d'échange (01) vs recirculation (0x06, coïncide avec
+	                      // BroanFanMode::Recirculate) - y compris à l'intérieur du mode
+	                      // Smart, où ni FanMode (00:20) ni BaseMode (02:20) ne bougent.
+	                      // Précède le débit d'air physique (CFM) de plusieurs secondes -
+	                      // logique, puisque le vrai changement implique un moteur de porte
+	                      // mécanique qui prend lui-même plusieurs minutes à se refermer.
+	IntModeFlag,          // 03:20. "Set to 0 when entering INT mode"
+	SmartVsContinuousFlag,// 08:20. "Set to 0 when entering SMART mode, set to 1 in continuous modes." <- candidat le plus prometteur
+
 	// Speeds
 	CFMIn_Medium,
 	CFMOut_Medium,
@@ -245,6 +262,15 @@ public:
 		{ 0x04, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // TurboRemaining (seconds)
 		{ 0x03, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // OvrRemaining (seconds) - bathroom (Ovr) boost countdown
 
+		// Candidats échange/recirculation interne (mode Smart) - voir commentaires
+		// de l'enum ci-dessus. UPDATE_RATE_FAST pour être sûr de capturer la
+		// prochaine transition, contrairement au scanner brute-force qui dépend
+		// du hasard du cycle de balayage.
+		{ 0x02, 0x30, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // OverrideActiveFlag
+		{ 0x07, 0x20, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // VentilationState
+		{ 0x03, 0x20, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // IntModeFlag
+		{ 0x08, 0x20, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // SmartVsContinuousFlag
+
 		// Speeds
 		{ 0x06, 0x22, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // MED target CFM in.
 		{ 0x08, 0x22, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // MED target CFM out.
@@ -269,8 +295,7 @@ public:
 
 /*
 		// Unknown fields scanned by the VTSPEEDW
-		{ 0x02, 0x30, BroanFieldType::Byte, {0} }, // Unknown. Toggles 01<->00 whenever an override (Turbo/Ovr/etc) starts.
-		{ 0x07, 0x20, BroanFieldType::Byte, {0} }, // Unknown. Toggles alongside 02:30 - looks like an override-type indicator (differs per override: Turbo vs Ovr vs ...).
+		// (02:30, 07:20, 03:20, 08:20 déplacés vers la liste active ci-dessus)
 		{ 0x0E, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 1 / 01
 		{ 0x0C, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 1 / 01
 		{ 0x0B, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 1 / 01
@@ -285,8 +310,7 @@ public:
 		{ 0x00, 0x30, BroanFieldType::Byte, {0} }, // Unknown. 0 / 00
 		{ 0x03, 0x30, BroanFieldType::Int, {0} }, // Bathroom (Ovr) boost countdown, seconds. Same shape as 04:30 but for the OVR mode. Read-only.
 		{ 0x07, 0x50, BroanFieldType::Int, {0} }, // Unknown. VTSPEEDW often sets this to -1
-		{ 0x03, 0x20, BroanFieldType::Byte, {0} }, // Unknown. Set to 0 when entering INT mode
-		{ 0x08, 0x20, BroanFieldType::Byte, {0} }, // Unknown. Set to 0 when entering SMART mode, set to 1 in continuous modes.
+		// (03:20, 08:20 déplacés vers la liste active ci-dessus)
 		{ 0x10, 0x22, BroanFieldType::Byte, {0} }, // Unknown. Written alongside 0F:22 when enabling Humidity control, always seen as 00 so far.
 */
 	};
@@ -368,7 +392,7 @@ private:
 	void writeRegisters( const std::vector<BroanField_t> &values );
 
 	std::string fanModeToString( uint8_t value );
-	std::string baseModeToString( uint8_t value );
+	std::string ventilationStateToString( uint8_t fanMode, uint8_t ventilationState );
 
 	float remap(float flIn, float flInMin, float flInMax, float flOutMin, float flOutMax) {
   		return (flIn - flInMin) * (flOutMax - flOutMin) / (flInMax - flInMin) + flOutMin;
