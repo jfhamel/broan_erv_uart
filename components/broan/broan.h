@@ -38,6 +38,11 @@ namespace broan {
 // (04:50/05:50) - confirmée par capture, ~20.3s peu importe si la valeur a changé.
 #define ENVIRONMENT_BROADCAST_RATE 20300
 
+// Si aucune réponse valide de l'ERV depuis ce délai, on considère le bus déconnecté
+// et on publie NAN (indisponible côté HA) sur les capteurs numériques plutôt que
+// de laisser les dernières valeurs connues affichées indéfiniment.
+#define BUS_TIMEOUT 60000
+
 #define MAX_REQUEST_SIZE 10
 #define INVALID_FIELD 0xFFFFFF
 
@@ -345,6 +350,8 @@ private:
 	uint32_t m_nLastHadControl = 0;
 	uint32_t m_unLastHeartbeat = 0; // Next time to send heartbeat
 	uint32_t m_unLastEnvironmentBroadcast = 0; // Next time to re-send humidity/temperature
+	uint32_t m_unLastValidResponse = 0; // Dernière fois qu'on a reçu une vraie réponse de l'ERV (opcode 21/41)
+	bool m_bBusTimedOut = false; // Déjà publié NAN suite à une absence de réponse - évite de le refaire à chaque tour de boucle
 
 	// Dernières valeurs fournies via setCurrentHumidity()/setCurrentTemperature(),
 	// re-diffusées périodiquement (voir runTasks()) même si elles n'ont pas changé,
@@ -390,9 +397,10 @@ private:
 	void runTasks();
 	void parseBroanFields(const std::vector<uint8_t>& message);
 	void writeRegisters( const std::vector<BroanField_t> &values );
+	void publishBusDisconnected(); // Publie NAN sur les capteurs numériques quand l'ERV ne répond plus
 
 	std::string fanModeToString( uint8_t value );
-	std::string ventilationStateToString( uint8_t fanMode, uint8_t ventilationState );
+	std::string ventilationStateToString( uint8_t ventilationState );
 
 	float remap(float flIn, float flInMin, float flInMax, float flOutMin, float flOutMax) {
   		return (flIn - flInMin) * (flOutMax - flOutMin) / (flInMax - flInMin) + flOutMin;
