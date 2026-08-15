@@ -902,6 +902,14 @@ void BroanComponent::publishBusDisconnected()
 	if( exhaust_rpm_sensor_ ) exhaust_rpm_sensor_->publish_state(NAN);
 	if( override_remaining_sensor_ ) override_remaining_sensor_->publish_state(NAN);
 #endif
+
+	// current_mode n'a pas d'équivalent de NAN (TextSensor::set_has_state(false)
+	// seul ne notifierait pas HA en temps réel - il faut un vrai publish_state()).
+	// "unknown" sert de valeur sentinelle: pas le badge "indisponible" natif de HA,
+	// mais un état explicite indiquant que la donnée n'est plus fraîche.
+#ifdef USE_TEXT_SENSOR
+	if( current_mode_text_sensor_ ) current_mode_text_sensor_->publish_state("unknown");
+#endif
 }
 
 }  // namespace broan
