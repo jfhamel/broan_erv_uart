@@ -264,6 +264,17 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 
 			break;
 		}
+		case 0x40:
+			// A write request - normally something WE send (never addressed back to
+			// ourselves, so never seen here in normal command mode). While listening
+			// in on a real physical wall controller's traffic though, this is how we
+			// overhear ITS writes to the ERV - notably the periodic indoor humidity/
+			// temperature broadcast (04:50/05:50). Shares the exact same
+			// register+length+data payload layout as a 0x21 response, so
+			// parseBroanFields() handles it identically - see the
+			// ControllerHumidity/ControllerTemperature cases there.
+			parseBroanFields(message);
+			break;
 		case 0x20:
 			// Read request from someone else's controller (seen while listening in
 			// on a real physical wall controller's traffic) - not addressed to us,
@@ -555,6 +566,32 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 					continue;
 
 				temperature_out_sensor_->publish_state(pField->m_value.m_flValue);		
+			}
+			break;
+
+			case BroanField::ControllerHumidity:
+			{
+				// Normally write-only (UPDATE_RATE_NEVER, we're the ones who write
+				// this via setCurrentHumidity()). This case only fires while
+				// listen_only is on and we overhear a real physical wall
+				// controller's own broadcast of it to the ERV - publishes it the
+				// same way setCurrentHumidity() does, so indoor_humidity keeps
+				// working seamlessly whether we're the active controller or just
+				// listening in on one.
+				if( !indoor_humidity_sensor_ )
+					continue;
+
+				indoor_humidity_sensor_->publish_state( pField->m_value.m_flValue );
+			}
+			break;
+
+			case BroanField::ControllerTemperature:
+			{
+				// Same as ControllerHumidity above, but for indoor_temperature.
+				if( !indoor_temperature_sensor_ )
+					continue;
+
+				indoor_temperature_sensor_->publish_state( pField->m_value.m_flValue );
 			}
 			break;
 

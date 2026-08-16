@@ -17,7 +17,7 @@ reverse-engineering documenté dans `broan-erv-protocole.md`.
 | `current_mode` | text_sensor | `off` / `exchange` / `deshumidistat` / `turbo` / `override` / `recirculation` — basé sur `07:20` (VentilationState), pas `02:20`. Publie `"unknown"` si le bus ERV est déconnecté depuis plus de 60s. |
 | `turbo_remaining` | sensor | Minutes restantes sur le Turbo actif (`04:30`). Lecture seule, 0 si Turbo inactif. |
 | `override_remaining` | sensor | Minutes restantes sur l'Ovr actif (`03:30`, boost salle de bain). Lecture seule, 0 si Ovr inactif. |
-| `indoor_temperature` / `indoor_humidity` | sensor | Republient les valeurs fournies via `setCurrentTemperature()`/`setCurrentHumidity()` (à toi de les appeler avec un capteur externe — voir section suivante). `indoor_temperature`-source (`01:E0`, capteur d'admission de l'ERV) publie `NAN` en recirculation. |
+| `indoor_temperature` / `indoor_humidity` | sensor | Republient les valeurs fournies via `setCurrentTemperature()`/`setCurrentHumidity()` (à toi de les appeler avec un capteur externe — voir section suivante), **ou automatiquement en mode `listen_only`** en interceptant la diffusion périodique d'un vrai contrôleur mural physique sur le bus. `indoor_temperature`-source (`01:E0`, capteur d'admission de l'ERV) publie `NAN` en recirculation. |
 | `power`, `filter_life`, `supply/exhaust_cfm`, `supply/exhaust_rpm`, `temperature` (ERV) | — | Inchangés. |
 
 **Changements notables de comportement en cours de route :**
@@ -72,6 +72,8 @@ Runtime équivalent de l'ancien `#define LISTEN_ONLY` (figé à la compilation),
 - `send()` devient un no-op complet : rien n'est jamais transmis tant que c'est actif.
 
 Pensé pour être combiné avec un relais (ex: Waveshare) qui coupe l'alimentation 12V du contrôleur mural physique — bascule les deux ensemble (idéalement via une automatisation HA) pour ne jamais avoir deux maîtres actifs sur le bus simultanément.
+
+`indoor_temperature`/`indoor_humidity` continuent de fonctionner automatiquement dans ce mode : la diffusion périodique du contrôleur mural physique (`04:50`/`05:50`, écriture `0x40` normalement destinée à l'ERV) est maintenant interceptée et republiée vers ces deux capteurs, exactement comme si c'était nous qui les avions écrites via `setCurrentHumidity()`/`setCurrentTemperature()`.
 
 ## Points à valider / limitations connues
 
