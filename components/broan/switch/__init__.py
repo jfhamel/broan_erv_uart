@@ -12,9 +12,11 @@ from .. import CONF_BROAN_ID, BroanComponent, broan_ns
 
 HumidityControlSwitch = broan_ns.class_("HumidityControlSwitch", switch.Switch)
 TurboSwitch = broan_ns.class_("TurboSwitch", switch.Switch)
+ListenOnlySwitch = broan_ns.class_("ListenOnlySwitch", switch.Switch)
 
 CONF_HUMIDITY_CONTROL = "humidity_control"
 CONF_TURBO = "turbo"
+CONF_LISTEN_ONLY = "listen_only"
 
 CONFIG_SCHEMA = {
     cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
@@ -32,6 +34,16 @@ CONFIG_SCHEMA = {
         entity_category=ENTITY_CATEGORY_CONFIG,
         icon=ICON_FAN,
     ),
+    # ON: passively observe all bus traffic (e.g. a real physical wall controller
+    # talking to the ERV) without ever transmitting anything ourselves - runtime
+    # equivalent of the old LISTEN_ONLY compile-time flag. Meant to be paired with
+    # a relay cutting power to the physical wall controller, so the two are never
+    # both active on the bus at the same time. OFF (default): normal command mode.
+    cv.Optional(CONF_LISTEN_ONLY): switch.switch_schema(
+        ListenOnlySwitch,
+        entity_category=ENTITY_CATEGORY_CONFIG,
+        icon="mdi:ear-hearing",
+    ),
 }
 
 
@@ -46,3 +58,8 @@ async def to_code(config):
         s = await switch.new_switch(turbo_config)
         await cg.register_parented(s, config[CONF_BROAN_ID])
         cg.add(broan_component.set_turbo_switch(s))
+
+    if listen_only_config := config.get(CONF_LISTEN_ONLY):
+        s = await switch.new_switch(listen_only_config)
+        await cg.register_parented(s, config[CONF_BROAN_ID])
+        cg.add(broan_component.set_listen_only_switch(s))

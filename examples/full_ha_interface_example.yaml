@@ -31,6 +31,10 @@ switch:
       on_turn_on:
         then:
           lambda: id(mybroan).setCurrentHumidity(id(myhumidity).state);
+    listen_only:
+      name: "Écoute seulement"     # ON: observe le bus sans jamais rien transmettre
+                                    # (à combiner avec un relais coupant le 12V du
+                                    # contrôleur mural physique)
 
 number:
   - platform: broan
@@ -46,9 +50,7 @@ number:
 text_sensor:
   - platform: broan
     current_mode:
-      name: "Ventilation en cours" # exchange / recirculation / off
-    override_state:
-      name: "Override actif"       # turbo / absence / humidity / ovr / none
+      name: "Ventilation en cours" # off / exchange / recirculation / deshumidistat / turbo / override
 
 sensor:
   - platform: broan

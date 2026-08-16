@@ -13,8 +13,8 @@ reverse-engineering documenté dans `broan-erv-protocole.md`.
 | `fan_speed` | number | Vitesse continue (0-100% → CFM min-max). **Applicable uniquement quand `fan_mode=exchange_adjustable`** — confirmé par capture qu'`exchange_min`/`exchange_max`/`exchange_med` (et la recirculation, tous paliers) n'acceptent aucune cible personnalisée. |
 | `intermittent_period` | number | 10 à 50 minutes, pas de 5 (registre en secondes, converti en interne). |
 | `humidity_control` (switch) + `humidity_setpoint` (number) | — | Inchangés, déjà corrects dans le dépôt d'origine. |
+| `listen_only` | switch *(nouveau)* | ON: observe passivement tout le trafic du bus (utile avec un vrai contrôleur mural encore branché) sans jamais rien transmettre — remplace l'ancien `#define LISTEN_ONLY` figé à la compilation. OFF (défaut): mode commande normal. Pensé pour être combiné avec un relais qui coupe l'alimentation du contrôleur mural physique, pour ne jamais avoir deux maîtres actifs sur le bus en même temps. |
 | `current_mode` | text_sensor | `off` / `exchange` / `deshumidistat` / `turbo` / `override` / `recirculation` — basé sur `07:20` (VentilationState), pas `02:20`. Publie `"unknown"` si le bus ERV est déconnecté depuis plus de 60s. |
-| `override_state` | text_sensor | `turbo` / `absence` / `humidity` / `ovr` / `none` — quel override est actif, le cas échéant. Lecture seule. |
 | `turbo_remaining` | sensor | Minutes restantes sur le Turbo actif (`04:30`). Lecture seule, 0 si Turbo inactif. |
 | `override_remaining` | sensor | Minutes restantes sur l'Ovr actif (`03:30`, boost salle de bain). Lecture seule, 0 si Ovr inactif. |
 | `indoor_temperature` / `indoor_humidity` | sensor | Republient les valeurs fournies via `setCurrentTemperature()`/`setCurrentHumidity()` (à toi de les appeler avec un capteur externe — voir section suivante). `indoor_temperature`-source (`01:E0`, capteur d'admission de l'ERV) publie `NAN` en recirculation. |
@@ -54,16 +54,24 @@ Les deux sont aussi rediffusées automatiquement toutes les ~20.3s (même si la 
   - Tous les commentaires traduits en anglais (le code lui-même était déjà en anglais).
 - **`select/`**: uniquement `fan_mode`, avec les 11 options.
 - **`number/`**: `turbo_duration_number.*` (remplace l'ancien select). `recirculation_speed_number.*` retiré. `intermittent_period_number.cpp` fait la conversion minutes↔secondes. `fan_speed_number.cpp`/`humidity_setpoint_number.cpp`/`fan_mode_select.cpp` ont maintenant un appel `publish_state()` immédiat dans leur `control()` (corrige un bug de rebond d'affichage rapporté par l'utilisateur).
-- **`switch/`**: `turbo_switch.*`.
+- **`switch/`**: `turbo_switch.*`, `listen_only_switch.*` (nouveau — voir section dédiée plus bas).
 - **`sensor.py`**: `turbo_remaining`, `override_remaining`, `indoor_temperature`/`indoor_humidity`.
-- **`text_sensor.py`**: `current_mode` et `override_state`.
+- **`text_sensor.py`**: `current_mode`.
 - **`TURBO_DURATION_1H/2H/4H`** retirées de `broan.h` — devenues inutilisées depuis le passage du select au number pour `turbo_duration`.
 
 ## Détection de bus déconnecté (watchdog)
 
 Si aucune réponse valide de l'ERV (opcode `21`/`41`) depuis `BUS_TIMEOUT` (60s), `publishBusDisconnected()` publie `NAN` sur les capteurs numériques (power, temperatures, filter_life, CFM, RPM, turbo_remaining, override_remaining) et `"unknown"` sur `current_mode`. `indoor_temperature`/`indoor_humidity` sont explicitement épargnés — leur source est un capteur HA externe via `setCurrentTemperature()`/`setCurrentHumidity()`, pas l'ERV, donc ils restent valides même bus coupé.
 
-Limitation connue : `fan_mode`, `override_state`, les switches `turbo`/`humidity_control` gardent leur dernier état connu — `TextSensor`/`Select`/`Switch` n'ont pas d'équivalent de `NAN` dans ESPHome (`set_has_state(false)` seul ne notifie pas HA en temps réel, il faut un vrai `publish_state()`, et ces types n'ont pas de valeur "vide" à publier).
+Limitation connue : `fan_mode`, les switches `turbo`/`humidity_control` gardent leur dernier état connu — `TextSensor`/`Select`/`Switch` n'ont pas d'équivalent de `NAN` dans ESPHome (`set_has_state(false)` seul ne notifie pas HA en temps réel, il faut un vrai `publish_state()`, et ces types n'ont pas de valeur "vide" à publier).
+
+## `listen_only` : observer un contrôleur mural physique encore branché
+
+Runtime équivalent de l'ancien `#define LISTEN_ONLY` (figé à la compilation), utilisé pour les toutes premières captures de ce projet en observant le vrai contrôleur mural sur le bus. Basculer ce switch sur ON, à tout moment, sans reflasher :
+- Traite tout message vu sur le bus, peu importe le destinataire (pas seulement ceux adressés à nous) — permet de voir le trafic entre un contrôleur mural physique et l'ERV.
+- `send()` devient un no-op complet : rien n'est jamais transmis tant que c'est actif.
+
+Pensé pour être combiné avec un relais (ex: Waveshare) qui coupe l'alimentation 12V du contrôleur mural physique — bascule les deux ensemble (idéalement via une automatisation HA) pour ne jamais avoir deux maîtres actifs sur le bus simultanément.
 
 ## Points à valider / limitations connues
 

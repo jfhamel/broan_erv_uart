@@ -304,5 +304,11 @@ void BroanComponent::startTurbo()
 	setTurboDuration( (uint32_t)( flMinutes * 60.f ) );
 }
 
+void BroanComponent::setListenOnly( bool enable )
+{
+	ESP_LOGI("broan_control", "Set listen only: %s", enable ? "ON" : "OFF");
+	m_bListenOnly = enable;
+}
+
 }  // namespace broan
 }  // namespace esphome

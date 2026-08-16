@@ -49,7 +49,8 @@ namespace broan {
 #define FILTER_LIFE_MAX 7884000
 
 //#define SCAN_UNKNOWN 1
-//#define LISTEN_ONLY 1
+// LISTEN_ONLY is no longer a compile-time flag - see the listen_only switch
+// and m_bListenOnly instead, which allow toggling this at runtime from HA.
 
 template<typename T>
 concept BroanFieldTypes = 	std::is_same_v<T, float> ||
@@ -210,7 +211,6 @@ class BroanComponent : public Component, public uart::UARTDevice
 
 #ifdef USE_TEXT_SENSOR
 	SUB_TEXT_SENSOR(current_mode)
-	SUB_TEXT_SENSOR(override_state)
 #endif
 
 #ifdef USE_SELECT
@@ -231,6 +231,7 @@ class BroanComponent : public Component, public uart::UARTDevice
 #ifdef USE_SWITCH
   SUB_SWITCH(humidity_control)
   SUB_SWITCH(turbo)
+  SUB_SWITCH(listen_only)
 #endif
 
 public:
@@ -336,6 +337,7 @@ public:
 	void setIntermittentPeriod( uint32_t period );
 	void setTurboDuration( uint32_t seconds );
 	void cancelOverride();
+	void setListenOnly( bool enable );
 	void startTurbo();
 
 private:
@@ -345,6 +347,14 @@ private:
 	uint32_t m_unLastEnvironmentBroadcast = 0; // Next time to re-send humidity/temperature
 	uint32_t m_unLastValidResponse = 0; // Last time a genuine response was received from the ERV (opcode 21/41)
 	bool m_bBusTimedOut = false; // Already published NAN due to lack of response - avoids repeating it every loop iteration
+
+	// Runtime equivalent of the old LISTEN_ONLY compile-time flag. When true: process
+	// every message seen on the bus regardless of its target (not just ones addressed
+	// to us) and never transmit anything ourselves - lets the ESP32 passively observe
+	// traffic between a real physical wall controller and the ERV without interfering.
+	// Meant to be paired with a relay cutting power to the physical wall controller,
+	// so the two are never both active on the bus at the same time.
+	bool m_bListenOnly = false;
 
 	// Last values supplied via setCurrentHumidity()/setCurrentTemperature(),
 	// re-broadcast periodically (see runTasks()) even if unchanged, to reproduce

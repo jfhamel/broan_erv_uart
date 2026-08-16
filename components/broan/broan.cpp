@@ -191,9 +191,10 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 		if( message[0] == 0x03 )
 			m_bWaitForRemote = false;
 	}
-#ifndef LISTEN_ONLY
-	if (target != m_nClientAddress) return;
-#endif
+	// In command mode (the normal, default case), ignore anything not addressed to
+	// us. In listen-only mode, process everything so we can observe traffic between
+	// a real physical wall controller and the ERV.
+	if( !m_bListenOnly && target != m_nClientAddress ) return;
 
 	int m_nType = message[0];
 	switch (m_nType)
@@ -263,10 +264,11 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 
 			break;
 		}
-#ifdef LISTEN_ONLY
 		case 0x20:
+			// Read request from someone else's controller (seen while listening in
+			// on a real physical wall controller's traffic) - not addressed to us,
+			// nothing to do.
 			break;
-#endif
 		default:
 		{
 			// Log unhandled m_nType
@@ -434,11 +436,12 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 
 #ifdef USE_SELECT
 				// fan_mode's declared options don't include turbo/humidity/ovr -
-				// those are exposed separately (turbo switch, override_state text
-				// sensor). Publishing one of them here would be rejected by
-				// select::publish_state() as an invalid option (logged as an
-				// error) since it validates against the declared option list.
-				// Simplest fix: only publish values that are actually selectable.
+				// those are exposed separately (turbo switch, override_remaining/
+				// turbo_remaining sensors). Publishing one of them here would be
+				// rejected by select::publish_state() as an invalid option (logged
+				// as an error) since it validates against the declared option
+				// list. Simplest fix: only publish values that are actually
+				// selectable.
 				if( fan_mode_select_ &&
 				    val != BroanFanMode::Turbo &&
 				    val != BroanFanMode::Humidity &&
@@ -452,18 +455,6 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				// own once the timer runs out.
 				if( turbo_switch_ )
 					turbo_switch_->publish_state( val == BroanFanMode::Turbo );
-#endif
-
-#ifdef USE_TEXT_SENSOR
-				if( override_state_text_sensor_ )
-				{
-					std::string state = "none";
-					if( val == BroanFanMode::Turbo ) state = "turbo";
-					else if( val == BroanFanMode::Away ) state = "absence";
-					else if( val == BroanFanMode::Humidity ) state = "humidity";
-					else if( val == BroanFanMode::Ovr ) state = "ovr";
-					override_state_text_sensor_->publish_state( state );
-				}
 #endif
 
 #ifdef USE_SENSOR
@@ -704,7 +695,12 @@ void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLo
 
 void BroanComponent::send(const std::vector<uint8_t>& vecMessage)
 {
-#ifndef LISTEN_ONLY
+	// Never transmit anything while listening in on a real physical wall
+	// controller's traffic - avoids ever having two masters active on the bus
+	// at the same time.
+	if( m_bListenOnly )
+		return;
+
  	if(flow_control_pin_)
     	flow_control_pin_->digital_write(true);
 
@@ -724,7 +720,6 @@ void BroanComponent::send(const std::vector<uint8_t>& vecMessage)
 
  	if(flow_control_pin_)
     	flow_control_pin_->digital_write(false);
-#endif
 }
 
 uint8_t BroanComponent::calculateChecksum(uint8_t sender, uint8_t receiver, const std::vector<uint8_t>& message)

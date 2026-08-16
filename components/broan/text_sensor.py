@@ -8,23 +8,15 @@ from . import CONF_BROAN_ID, BroanComponent
 DEPENDENCIES = ["broan"]
 
 CONF_CURRENT_MODE = "current_mode"
-CONF_OVERRIDE_STATE = "override_state"
 
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
-        # What the ERV is physically doing right now: "exchange", "recirculation" or
-        # "off". Distinct from the fan_mode select, which shows what was *commanded*
-        # (e.g. it can say "turbo" while current_mode still says "exchange", since
-        # Turbo is a temporary boost on top of whatever base mode was running).
+        # What the ERV is physically doing right now: "off", "exchange",
+        # "recirculation", "deshumidistat", "turbo" or "override". Based on 07:20
+        # (VentilationState) - see broan-erv-protocole.md for the full table.
         cv.Optional(CONF_CURRENT_MODE): text_sensor.text_sensor_schema(
             icon=ICON_FAN,
-        ),
-        # Which timed/temporary override (if any) is currently layered on top of
-        # current_mode: "turbo", "absence", "humidity", "ovr", or "none". Read-only -
-        # pair with the override_remaining sensor for the countdown.
-        cv.Optional(CONF_OVERRIDE_STATE): text_sensor.text_sensor_schema(
-            icon="mdi:timer-alert",
         ),
     }
 )
@@ -35,7 +27,3 @@ async def to_code(config):
     if current_mode_config := config.get(CONF_CURRENT_MODE):
         sens = await text_sensor.new_text_sensor(current_mode_config)
         cg.add(broan_component.set_current_mode_text_sensor(sens))
-
-    if override_state_config := config.get(CONF_OVERRIDE_STATE):
-        sens = await text_sensor.new_text_sensor(override_state_config)
-        cg.add(broan_component.set_override_state_text_sensor(sens))
