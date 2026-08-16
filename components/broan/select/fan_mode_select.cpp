@@ -5,8 +5,9 @@ namespace broan {
 
 void FanModeSelect::control(const std::string &value)
 {
+	this->publish_state(value);
 	this->parent_->setFanMode( value );
 }
 
-}  // namespace ld2410
+}  // namespace broan
 }  // namespace esphome

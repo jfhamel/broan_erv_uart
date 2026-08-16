@@ -19,7 +19,7 @@ broan:
 select:
   - platform: broan
     fan_mode:
-      name: "Mode de ventilation" # off / smart / intermittent / exchange / recirculation / absence
+      name: "Mode de ventilation" # off / smart / intermittent / exchange_min|med|max / exchange_adjustable / recirculation_min|med|max / absence
 
 switch:
   - platform: broan
@@ -35,9 +35,7 @@ switch:
 number:
   - platform: broan
     fan_speed:
-      name: "Vitesse (échange)"    # 0-100%, s'applique uniquement en mode exchange
-    recirculation_speed:
-      name: "Vitesse (recirculation)" # 0/50/100% -> min/med/max, 3 paliers fixes seulement
+      name: "Vitesse (échange ajustable)" # 0-100%, s'applique uniquement si fan_mode=exchange_adjustable
     turbo_duration:
       name: "Durée du Turbo"       # 0-240 min, pas de 15 (0-4h). 0 = ne démarre pas.
     intermittent_period:
@@ -70,8 +68,10 @@ sensor:
       name: "Vitesse moteur soufflage (RPM)"
     exhaust_fan_rpm:
       name: "Vitesse moteur extraction (RPM)"
+    turbo_remaining:
+      name: "Temps restant (Turbo)"
     override_remaining:
-      name: "Temps restant (override)"
+      name: "Temps restant (Ovr salle de bain)"
     indoor_temperature:
       name: "Température intérieure"
     indoor_humidity:
@@ -109,5 +109,3 @@ button:
   - platform: broan
     filter_reset:
       name: "Réinitialiser le filtre"
-    cancel_override:
-      name: "Annuler Absence/Deshumidistat" # Turbo a son propre switch pour ça

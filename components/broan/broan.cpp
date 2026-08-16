@@ -15,8 +15,8 @@ void BroanComponent::setup()
 	for( int i=0; i<BroanField::MAX_FIELDS; i++ )
 		m_vecFields[i].markDirty();
 
-	// Évite un faux déclenchement du timeout de bus au tout premier boot, avant
-	// même d'avoir eu la chance d'échanger quoi que ce soit avec l'ERV.
+	// Avoids a false bus-timeout trigger on the very first boot, before we've
+	// even had a chance to exchange anything with the ERV.
 	m_unLastValidResponse = millis();
 
   	if(flow_control_pin_)
@@ -231,7 +231,7 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 
 		case 0x41:
 		{
-			// Une vraie réponse de l'ERV - il est toujours là.
+			// A genuine response from the ERV - it's still there.
 			m_unLastValidResponse = millis();
 			m_bBusTimedOut = false;
 
@@ -253,7 +253,7 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 		}
 		case 0x21:
 		{
-			// Une vraie réponse de l'ERV - il est toujours là.
+			// A genuine response from the ERV - it's still there.
 			m_unLastValidResponse = millis();
 			m_bBusTimedOut = false;
 
@@ -324,39 +324,43 @@ void BroanComponent::queueMessage(std::vector<uint8_t>& message)
 
 // Used for the fan_mode select's displayed state (register 00:20 / commanded mode).
 // Keeps full granularity since this reflects exactly what was written to the ERV.
+// Used for the fan_mode select's displayed state (register 00:20 / commanded mode).
+// Note that ExchangeMedManual (0x0B) is ambiguous on the wire alone: "exchange_med"
+// and "exchange_adjustable" both write this same byte, only m_bAdjustableSpeed (our
+// own side, not recoverable from a bus read) tells them apart.
 std::string BroanComponent::fanModeToString( uint8_t value )
 {
 	switch( value )
 	{
 		case BroanFanMode::Ovr: return "ovr";
 		case BroanFanMode::Intermittent: return "intermittent";
-		case BroanFanMode::Min: return "min";
-		case BroanFanMode::Max: return "max";
-		case BroanFanMode::Manual: return "exchange";
+		case BroanFanMode::ExchangeMin: return "exchange_min";
+		case BroanFanMode::ExchangeMax: return "exchange_max";
+		case BroanFanMode::ExchangeMedManual: return m_bAdjustableSpeed ? "exchange_adjustable" : "exchange_med";
 		case BroanFanMode::Turbo: return "turbo";
 		case BroanFanMode::Humidity: return "humidity";
 		case BroanFanMode::Away: return "absence";
 		case BroanFanMode::Smart: return "smart";
-		case BroanFanMode::RecirculateMin:
-		case BroanFanMode::RecirculateMed:
-		case BroanFanMode::Recirculate: return "recirculation";
+		case BroanFanMode::RecirculateMin: return "recirculation_min";
+		case BroanFanMode::RecirculateMed: return "recirculation_med";
+		case BroanFanMode::Recirculate: return "recirculation_max";
 		default: return "off";
 	}
 }
 
-// Used for the current_mode status text sensor. Table complète confirmée par
-// capture le 13-14 août 2026, testée sur tous les modes/paliers (Smart interne,
-// Turbo, Deshumidistat, Ovr, Absence, Intermittent - phases échange et repos,
+// Used for the current_mode status text sensor. Full table confirmed by
+// capture on 2026-08-13/14, tested across all modes/tiers (internal Smart,
+// Turbo, Deshumidistat, Ovr, Absence, Intermittent - exchange and rest phases,
 // Recirc Min/Med/Max):
-//   00 = off                  04 = exchange (identique fonctionnellement à 01,
-//   01 = exchange                  différence non comprise au niveau matériel)
-//   02 = deshumidistat        05 = override (Ovr / boost salle de bain)
+//   00 = off                  04 = exchange (functionally identical to 01,
+//   01 = exchange                  difference not understood at the hardware level)
+//   02 = deshumidistat        05 = override (Ovr / bathroom boost)
 //   03 = turbo                06 = recirculation min
 //                             07 = recirculation max
 //                             08 = recirculation medium
-// current_mode simplifie volontairement 01/04 -> "exchange" et 06/07/08 ->
-// "recirculation": ne reflète plus que ce que fait l'ERV, pas à quel palier.
-// Ne dépend plus de FanMode (00:20) - 07:20 encode déjà "off" (00) directement.
+// current_mode deliberately simplifies 01/04 -> "exchange" and 06/07/08 ->
+// "recirculation": it only reflects what the ERV is doing, not at which tier.
+// No longer depends on FanMode (00:20) - 07:20 already encodes "off" (00) directly.
 std::string BroanComponent::ventilationStateToString( uint8_t ventilationState )
 {
 	switch( ventilationState )
@@ -406,20 +410,20 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 		if( oldVal == pField->m_value.m_nValue )
 			continue;
 
-		// Keep track of whether we're in continuous exchange (Manual/0x0B) so
-		// setFanSpeed()/setRecirculationSpeed() know their 0-100% input is
-		// meaningful right now, including when the ERV reverts on its own (Turbo
-		// timer expiring, Absence schedule, etc). Kept outside the ifdefs below so
-		// it still works even if the select/number platforms aren't used.
+		// Keeps m_bAdjustableSpeed in sync when the ERV reverts to a different
+		// FanMode on its own (Turbo timer expiring, Absence schedule, etc) - if
+		// FanMode isn't ExchangeMedManual (0x0B) anymore, adjustable speed can't
+		// apply regardless. If it IS 0x0B, leave the flag alone: that byte is
+		// ambiguous on the wire (both "exchange_med" and "exchange_adjustable"
+		// write it), so only our own last explicit selection (set synchronously in
+		// setFanMode()) can tell them apart - a bus read can't recover that.
+		// Kept outside the ifdefs below so it still works even if the
+		// select/number platforms aren't used.
 		if( unField == BroanField::FanMode )
 		{
 			uint8_t val = pField->m_value.m_chValue;
-			if( val == BroanFanMode::Manual )
-				m_eSpeedFamily = BroanFanMode::Manual;
-			else if( val == BroanFanMode::Recirculate || val == BroanFanMode::RecirculateMin || val == BroanFanMode::RecirculateMed )
-				m_eSpeedFamily = BroanFanMode::Recirculate;
-			else
-				m_eSpeedFamily = BroanFanMode::Off;
+			if( val != BroanFanMode::ExchangeMedManual )
+				m_bAdjustableSpeed = false;
 		}
 
 		switch(unField)
@@ -463,15 +467,11 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 #endif
 
 #ifdef USE_SENSOR
+				if( turbo_remaining_sensor_ )
+					turbo_remaining_sensor_->publish_state( val == BroanFanMode::Turbo ? m_vecFields[TurboRemaining].m_value.m_nValue / 60.f : 0.f );
+
 				if( override_remaining_sensor_ )
-				{
-					float remaining = 0.f;
-					if( val == BroanFanMode::Turbo )
-						remaining = m_vecFields[TurboRemaining].m_value.m_nValue / 60.f;
-					else if( val == BroanFanMode::Ovr )
-						remaining = m_vecFields[OvrRemaining].m_value.m_nValue / 60.f;
-					override_remaining_sensor_->publish_state( remaining );
-				}
+					override_remaining_sensor_->publish_state( val == BroanFanMode::Ovr ? m_vecFields[OvrRemaining].m_value.m_nValue / 60.f : 0.f );
 #endif
 			}
 			break;
@@ -485,10 +485,10 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 #endif
 
 #ifdef USE_SENSOR
-				// Republie tout de suite la température extérieure (voir le cas
-				// TemperatureIn ci-dessous) au moment même du changement d'état,
-				// plutôt que d'attendre jusqu'à 10s le prochain cycle de lecture
-				// de 01:E0 pour refléter la bascule.
+				// Immediately re-publishes the outdoor temperature (see the
+				// TemperatureIn case below) right at the moment the state changes,
+				// rather than waiting up to 10s for the next read cycle of 01:E0
+				// to reflect the switch.
 				if( temperature_sensor_ )
 				{
 					if( ventState == BroanFanMode::Recirculate )
@@ -519,10 +519,10 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !temperature_sensor_ )
 					continue;
 
-				// Recirculation: pas d'air extérieur admis, cette sonde ne mesure
-				// alors que de l'air recyclé/intérieur - valeur trompeuse si
-				// affichée comme "température extérieure". Publie NAN (= indisponible
-				// côté HA) plutôt que cette valeur non représentative.
+				// Recirculation: no outdoor air is admitted, so this sensor only
+				// measures recycled/indoor air - misleading if shown as
+				// "outdoor temperature". Publishes NAN (= unavailable in HA)
+				// instead of this unrepresentative value.
 				if( m_vecFields[VentilationState].m_value.m_chValue == BroanFanMode::Recirculate )
 					temperature_sensor_->publish_state(NAN);
 				else
@@ -569,13 +569,13 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 
 			case BroanField::TurboRemaining:
 			{
-				if( !override_remaining_sensor_ )
+				if( !turbo_remaining_sensor_ )
 					continue;
 
 				// Only publish if Turbo is the currently active override - avoids
 				// pushing a stale/irrelevant countdown if something else is active.
 				if( m_vecFields[FanMode].m_value.m_chValue == BroanFanMode::Turbo )
-					override_remaining_sensor_->publish_state( pField->m_value.m_nValue / 60.f );
+					turbo_remaining_sensor_->publish_state( pField->m_value.m_nValue / 60.f );
 			}
 			break;
 
@@ -614,11 +614,11 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !intermittent_period_number_ )
 					continue;
 
-				// Le registre est en secondes sur le fil, la roulette en minutes
-				// (voir IntermittentPeriodNumber::control() pour la conversion
-				// inverse à l'écriture) - sans ça, la valeur brute (ex: 600 pour
-				// 10 minutes) s'affiche telle quelle comme si c'était déjà des
-				// minutes, visible au premier démarrage avant toute interaction.
+				// The register is in seconds on the wire, the number entity in minutes
+				// (see IntermittentPeriodNumber::control() for the reverse
+				// conversion at write time) - without this, the raw value (e.g. 600
+				// for 10 minutes) would display as-is as if it were already in
+				// minutes, visible on first boot before any interaction.
 				intermittent_period_number_->publish_state(pField->m_value.m_nValue / 60.f);
 			break;
 #endif
@@ -802,12 +802,11 @@ void BroanComponent::runTasks()
 		queueMessage(vecRequest);
 	}
 
-	// Rediffuse humidité/température toutes les ~20.3s même si la valeur n'a pas
-	// changé, comme le fait le contrôleur mural physique (confirmé par capture).
-	// setCurrentHumidity()/setCurrentTemperature() repoussent déjà ce minuteur
-	// quand une vraie mise à jour arrive - ceci ne fait qu'assurer que l'ERV
-	// continue de recevoir un signal régulier même si le capteur source de HA
-	// ne change pas pendant un moment.
+	// Re-broadcasts humidity/temperature every ~20.3s even if the value hasn't
+	// changed, as the physical wall controller does (confirmed by capture).
+	// setCurrentHumidity()/setCurrentTemperature() already push this timer back
+	// whenever a genuine update arrives - this only ensures the ERV keeps
+	// getting a regular signal even if the HA source sensor doesn't change for a while.
 	if( ( m_bHaveHumidity || m_bHaveTemperature ) && time - m_unLastEnvironmentBroadcast > ENVIRONMENT_BROADCAST_RATE )
 	{
 		m_unLastEnvironmentBroadcast = time;
@@ -829,10 +828,10 @@ void BroanComponent::runTasks()
 		writeRegisters( vecFields );
 	}
 
-	// Aucune réponse valide de l'ERV depuis BUS_TIMEOUT - publie NAN sur les
-	// capteurs numériques plutôt que de laisser les dernières valeurs connues
-	// affichées indéfiniment. m_bBusTimedOut évite de le refaire à chaque tour
-	// tant que la situation ne s'est pas résolue.
+	// No valid response from the ERV since BUS_TIMEOUT - publishes NAN on
+	// numeric sensors instead of leaving the last known values displayed
+	// indefinitely. m_bBusTimedOut avoids repeating this every loop iteration
+	// while the situation remains unresolved.
 	if( !m_bBusTimedOut && time - m_unLastValidResponse > BUS_TIMEOUT )
 	{
 		m_bBusTimedOut = true;
@@ -886,11 +885,11 @@ void BroanComponent::runTasks()
 
 void BroanComponent::publishBusDisconnected()
 {
-	// Uniquement les capteurs dont la valeur vient réellement de l'ERV via le bus -
-	// indoor_temperature/indoor_humidity ne sont PAS concernés: on les publie
-	// nous-mêmes depuis setCurrentTemperature()/setCurrentHumidity(), leur source
-	// est un capteur HA externe, pas l'ERV - ils restent valides même si le bus
-	// vers l'ERV est coupé.
+	// Only the sensors whose value genuinely comes from the ERV over the bus -
+	// indoor_temperature/indoor_humidity are NOT affected: we publish those
+	// ourselves from setCurrentTemperature()/setCurrentHumidity(), their source
+	// is an external HA sensor, not the ERV - they stay valid even if the bus
+	// to the ERV is down.
 #ifdef USE_SENSOR
 	if( power_sensor_ ) power_sensor_->publish_state(NAN);
 	if( temperature_sensor_ ) temperature_sensor_->publish_state(NAN);
@@ -900,13 +899,14 @@ void BroanComponent::publishBusDisconnected()
 	if( exhaust_cfm_sensor_ ) exhaust_cfm_sensor_->publish_state(NAN);
 	if( supply_rpm_sensor_ ) supply_rpm_sensor_->publish_state(NAN);
 	if( exhaust_rpm_sensor_ ) exhaust_rpm_sensor_->publish_state(NAN);
+	if( turbo_remaining_sensor_ ) turbo_remaining_sensor_->publish_state(NAN);
 	if( override_remaining_sensor_ ) override_remaining_sensor_->publish_state(NAN);
 #endif
 
-	// current_mode n'a pas d'équivalent de NAN (TextSensor::set_has_state(false)
-	// seul ne notifierait pas HA en temps réel - il faut un vrai publish_state()).
-	// "unknown" sert de valeur sentinelle: pas le badge "indisponible" natif de HA,
-	// mais un état explicite indiquant que la donnée n'est plus fraîche.
+	// current_mode has no NAN equivalent (TextSensor::set_has_state(false) alone
+	// wouldn't notify HA in real time - a genuine publish_state() call is needed).
+	// "unknown" acts as a sentinel value: not HA's native "unavailable" badge,
+	// but an explicit state indicating the data is no longer fresh.
 #ifdef USE_TEXT_SENSOR
 	if( current_mode_text_sensor_ ) current_mode_text_sensor_->publish_state("unknown");
 #endif

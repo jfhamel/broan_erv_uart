@@ -5,6 +5,7 @@ namespace broan {
 
 void HumiditySetpointNumber::control(float value)
 {
+	this->publish_state(value);
 	this->parent_->setHumiditySetpoint( value );
 }
 

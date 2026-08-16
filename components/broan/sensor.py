@@ -27,6 +27,7 @@ CONF_SUPPLY_RPM = "supply_fan_rpm"
 CONF_EXHAUST_RPM = "exhaust_fan_rpm"
 CONF_INDOOR_TEMPERATURE = "indoor_temperature"
 CONF_INDOOR_HUMIDITY = "indoor_humidity"
+CONF_TURBO_REMAINING = "turbo_remaining"
 CONF_OVERRIDE_REMAINING = "override_remaining"
 
 UNIT_CFM = "CFM"
@@ -92,8 +93,13 @@ CONFIG_SCHEMA = cv.Schema(
             icon=ICON_FAN,
             unit_of_measurement=UNIT_RPM,
         ),
-        # Minutes remaining on whichever timed override is currently active (Turbo
-        # or the bathroom Ovr boost). Reads 0 when neither is active.
+        # Minutes remaining on the current Turbo boost. Reads 0 when Turbo isn't active.
+        cv.Optional(CONF_TURBO_REMAINING): sensor.sensor_schema(
+            icon=ICON_TIMER,
+            unit_of_measurement=UNIT_MINUTE,
+        ),
+        # Minutes remaining on the current Ovr (bathroom boost) timer. Reads 0 when
+        # Ovr isn't active.
         cv.Optional(CONF_OVERRIDE_REMAINING): sensor.sensor_schema(
             icon=ICON_TIMER,
             unit_of_measurement=UNIT_MINUTE,
@@ -142,6 +148,10 @@ async def to_code(config):
     if exhaust_rpm_config := config.get(CONF_EXHAUST_RPM):
         sens = await sensor.new_sensor(exhaust_rpm_config)
         cg.add(broan_component.set_exhaust_rpm_sensor(sens))
+
+    if turbo_remaining_config := config.get(CONF_TURBO_REMAINING):
+        sens = await sensor.new_sensor(turbo_remaining_config)
+        cg.add(broan_component.set_turbo_remaining_sensor(sens))
 
     if override_remaining_config := config.get(CONF_OVERRIDE_REMAINING):
         sens = await sensor.new_sensor(override_remaining_config)

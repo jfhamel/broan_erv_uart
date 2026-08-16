@@ -7,28 +7,46 @@ void BroanComponent::setFanMode( std::string mode )
 {
 	uint8_t value = 0x01;
 
-	// Top-level modes exposed to Home Assistant. "off"/"smart"/"exchange"/"recirculation"/"absence"
-	// are simple, single-register writes. Turbo is deliberately NOT selectable here: the real wall
-	// controller always writes TurboDuration + FanMode together in one frame (see setTurboDuration()),
-	// and we've never captured a plain "turbo, no duration" write, so we don't emulate one.
+	// Top-level modes exposed to Home Assistant. "off"/"smart"/"intermittent"/"absence"
+	// are simple, single-register writes. Turbo is deliberately NOT selectable here: the
+	// real wall controller always writes TurboDuration + FanMode together in one frame
+	// (see setTurboDuration()), and we've never captured a plain "turbo, no duration"
+	// write, so we don't emulate one.
+	//
+	// Exchange and recirculation both expose their min/med/max steps directly rather
+	// than a single mode + a speed number: confirmed by capture that ExchangeMin/Max
+	// (0x09/0x0A) don't accept an adjustable speed at all (same as recirculation), only
+	// ExchangeMedManual (0x0B) does - and even then, only when "exchange_adjustable" was
+	// explicitly picked (see m_bAdjustableSpeed below), not for the plain "exchange_med".
+	bool bAdjustable = false;
+
 	if( mode == "smart" )
 		value = BroanFanMode::Smart;
 	else if( mode == "intermittent" )
 		value = BroanFanMode::Intermittent;
-	else if( mode == "exchange" )
+	else if( mode == "exchange_min" )
+		value = BroanFanMode::ExchangeMin;
+	else if( mode == "exchange_max" )
+		value = BroanFanMode::ExchangeMax;
+	else if( mode == "exchange_med" )
+		value = BroanFanMode::ExchangeMedManual;
+	else if( mode == "exchange_adjustable" )
 	{
-		value = BroanFanMode::Manual;
-		m_eSpeedFamily = BroanFanMode::Manual;
+		value = BroanFanMode::ExchangeMedManual;
+		bAdjustable = true;
 	}
-	else if( mode == "recirculation" )
-	{
-		value = BroanFanMode::Recirculate; // Max par défaut, ajusté ci-dessous si recirculation_speed est déjà réglée
-		m_eSpeedFamily = BroanFanMode::Recirculate;
-	}
+	else if( mode == "recirculation_min" )
+		value = BroanFanMode::RecirculateMin;
+	else if( mode == "recirculation_med" )
+		value = BroanFanMode::RecirculateMed;
+	else if( mode == "recirculation_max" )
+		value = BroanFanMode::Recirculate;
 	else if( mode == "absence" )
 		value = BroanFanMode::Away;
 	else
 		value = BroanFanMode::Off;
+
+	m_bAdjustableSpeed = bAdjustable;
 
 	ESP_LOGI("broan_control", "Set fan mode: %s (%02X)", mode.c_str(), value);
 
@@ -39,85 +57,47 @@ void BroanComponent::setFanMode( std::string mode )
 
 	writeRegisters( vecFields );
 
-	// Applique tout de suite la vitesse déjà affichée dans HA plutôt que de
-	// laisser l'ERV sur une cible potentiellement périmée d'une session
-	// précédente. m_eSpeedFamily étant déjà à jour ci-dessus (synchrone), les
-	// garde-fous de setFanSpeed()/setRecirculationSpeed() laissent passer ces
-	// appels normalement.
+	// "exchange_adjustable" applies the speed already shown in HA right away, rather
+	// than leaving the ERV on a possibly stale target from a previous session.
+	// m_bAdjustableSpeed is already up to date above (synchronous), so setFanSpeed()'s
+	// guard lets this call through normally.
 #ifdef USE_NUMBER
-	if( mode == "exchange" && fan_speed_number_ )
+	if( bAdjustable && fan_speed_number_ )
 		setFanSpeed( fan_speed_number_->state );
-	else if( mode == "recirculation" && recirculation_speed_number_ )
-		setRecirculationSpeed( recirculation_speed_number_->state );
 #endif
 }
 
 void BroanComponent::setFanSpeed( float input )
 {
-	// Continuous exchange (Manual/0x0B): confirmed by capture. The physical wall
-	// controller never offers this, but the ERV honors any CFM target you write
-	// into 06:22/08:22 while sitting in that mode.
-	if( m_eSpeedFamily == BroanFanMode::Manual )
+	// Only applies when "exchange_adjustable" was explicitly selected (see setFanMode()).
+	// ExchangeMin/Max and the plain "exchange_med" all confirmed by capture to ignore a
+	// custom CFM target - same as recirculation, which never had adjustable speed either
+	// and is now exposed as three direct steps instead of a number.
+	if( !m_bAdjustableSpeed )
 	{
-		float flMin = m_vecFields[CFMIn_Min].m_value.m_flValue;
-		float flMax = m_vecFields[CFMIn_Max].m_value.m_flValue;
-		if( flMin == 0 || flMax == 0 )
-		{
-			ESP_LOGE("broan","Failed to set fan speed: Invalid min/max state");
-			return;
-		}
-		float value = remap( input, 0.f, 100.f, flMin, flMax );
-
-		ESP_LOGI("broan_control", "Set fan speed (exchange): %.0f%% -> %.1f CFM", input, value);
-
-		std::vector<BroanField_t> vecFields;
-
-		vecFields.push_back( m_vecFields[CFMIn_Medium].copyForUpdate( value ) );
-		vecFields.push_back( m_vecFields[CFMOut_Medium].copyForUpdate( value ) );
-
-		m_vecFields[CFMIn_Medium].markDirty();
-		m_vecFields[CFMOut_Medium].markDirty();
-
-		writeRegisters( vecFields );
+		ESP_LOGW("broan","setFanSpeed() only applies when 'exchange_adjustable' is selected");
 		return;
 	}
 
-	ESP_LOGW("broan","setFanSpeed() only applies in 'exchange' mode. Use recirculation_speed for recirculation.");
-}
-
-void BroanComponent::setRecirculationSpeed( float percent )
-{
-	// Découplé du changement de mode: n'agit sur le bus que si on est déjà en
-	// recirculation (comme setFanSpeed() pour l'échange). Sinon, seule la valeur
-	// HA (publish_state, fait par RecirculationSpeedNumber::control()) est mise à
-	// jour - rien n'est envoyé à l'ERV, et le mode ne change pas.
-	// Note: on vérifie m_eSpeedFamily (mis à jour de façon synchrone dans
-	// setFanMode()) plutôt que m_vecFields[FanMode] directement, qui lui ne se
-	// met à jour qu'après relecture du bus - sinon, appeler cette fonction juste
-	// après un changement de mode verrait encore l'ancienne valeur.
-	if( m_eSpeedFamily != BroanFanMode::Recirculate )
+	float flMin = m_vecFields[CFMIn_Min].m_value.m_flValue;
+	float flMax = m_vecFields[CFMIn_Max].m_value.m_flValue;
+	if( flMin == 0 || flMax == 0 )
 	{
-		ESP_LOGD("broan_control", "recirculation_speed changed while not in recirculation - not sent to the ERV");
+		ESP_LOGE("broan","Failed to set fan speed: Invalid min/max state");
 		return;
 	}
+	float value = remap( input, 0.f, 100.f, flMin, flMax );
 
-	// CONFIRMED BY CAPTURE: writing a custom CFM target while in recirculation has
-	// no effect on real airflow - the ERV stays pinned wherever it was regardless
-	// of the value sent. Recirculation genuinely only has these three fixed steps.
-	// This takes a 0-100% input (matching the number's 3 fixed stops: 0/50/100)
-	// and maps it to the nearest of the three.
-	uint8_t value = BroanFanMode::Recirculate; // max
-
-	if( percent < 33.f )
-		value = BroanFanMode::RecirculateMin;
-	else if( percent < 67.f )
-		value = BroanFanMode::RecirculateMed;
-
-	ESP_LOGI("broan_control", "Set recirculation speed: %.0f%% -> %02X", percent, value);
+	ESP_LOGI("broan_control", "Set fan speed (exchange_adjustable): %.0f%% -> %.1f CFM", input, value);
 
 	std::vector<BroanField_t> vecFields;
-	vecFields.push_back( m_vecFields[FanMode].copyForUpdate( value ) );
-	m_vecFields[FanMode].markDirty();
+
+	vecFields.push_back( m_vecFields[CFMIn_Medium].copyForUpdate( value ) );
+	vecFields.push_back( m_vecFields[CFMOut_Medium].copyForUpdate( value ) );
+
+	m_vecFields[CFMIn_Medium].markDirty();
+	m_vecFields[CFMOut_Medium].markDirty();
+
 	writeRegisters( vecFields );
 }
 
@@ -130,7 +110,7 @@ void BroanComponent::setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, 
 
 	switch( mode )
 	{
-		case BroanFanMode::Max:
+		case BroanFanMode::ExchangeMax:
 		{
 			if( ( direction & BroanCFMMode::Input ) != 0 )
 				vecFields.push_back( m_vecFields[CFMIn_Max].copyForUpdate( flTargetCFM ) );
@@ -139,7 +119,7 @@ void BroanComponent::setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, 
 		}
 		break;
 
-		case BroanFanMode::Min:
+		case BroanFanMode::ExchangeMin:
 		{
 			if( ( direction & BroanCFMMode::Input ) != 0 )
 				vecFields.push_back( m_vecFields[CFMIn_Max].copyForUpdate( flTargetCFM ) );
@@ -217,8 +197,8 @@ void BroanComponent::setCurrentHumidity( float humidity ) {
 
 	writeRegisters( vecFields );
 
-	// Mémorise pour la rediffusion périodique (voir runTasks()) et repousse le
-	// prochain envoi automatique puisqu'on vient d'en faire un.
+	// Remembers the value for periodic re-broadcast (see runTasks()) and pushes the
+	// next automatic send back out, since we just did one now.
 	m_flLastHumidity = humidity;
 	m_bHaveHumidity = true;
 	m_unLastEnvironmentBroadcast = millis();
