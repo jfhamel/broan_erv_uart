@@ -8,9 +8,9 @@ class BroanComponent;
 namespace esphome {
 namespace broan {
 
-class FanModeSelect : public select::Select, public Parented<BroanComponent> {
+class CommandedFanModeSelect : public select::Select, public Parented<BroanComponent> {
 public:
-	FanModeSelect() = default;
+	CommandedFanModeSelect() = default;
 
 protected:
 	void control(const std::string &value) override;

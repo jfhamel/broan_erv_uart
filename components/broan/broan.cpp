@@ -201,7 +201,14 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 	{
 		case 0x02:
 		{
-			// Respond to ping
+			// Respond to ping - only meaningful if this ping is genuinely addressed
+			// to us. While listening in on a real wall controller's traffic, the
+			// ERV pings IT, not us - reacting to that (and updating our own state
+			// below as if we were pinged) would be wrong, even though send() itself
+			// is already a safe no-op in that case.
+			if( m_bListenOnly )
+				break;
+
 			std::vector<uint8_t> reply = {0x03};
 			reply.insert(reply.end(), message.begin() + 1, message.end());
 
@@ -213,7 +220,12 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 		}
 		case 0x04:
 		{
-			// Flow control
+			// Flow control - same reasoning as 0x02 above: only relevant if this
+			// exchange is genuinely with us, not something we're merely overhearing
+			// between the ERV and a real wall controller.
+			if( m_bListenOnly )
+				break;
+
 			m_nLastHadControl = millis();
 			m_bHaveControl = true;
 			m_bExpectingReply = false;
@@ -361,7 +373,7 @@ std::string BroanComponent::fanModeToString( uint8_t value )
 	}
 }
 
-// Used for the current_mode status text sensor. Full table confirmed by
+// Used for the ventilation_state status text sensor. Full table confirmed by
 // capture on 2026-08-13/14, tested across all modes/tiers (internal Smart,
 // Turbo, Deshumidistat, Ovr, Absence, Intermittent - exchange and rest phases,
 // Recirc Min/Med/Max):
@@ -371,7 +383,7 @@ std::string BroanComponent::fanModeToString( uint8_t value )
 //   03 = turbo                06 = recirculation min
 //                             07 = recirculation max
 //                             08 = recirculation medium
-// current_mode deliberately simplifies 01/04 -> "exchange" and 06/07/08 ->
+// ventilation_state deliberately simplifies 01/04 -> "exchange" and 06/07/08 ->
 // "recirculation": it only reflects what the ERV is doing, not at which tier.
 // No longer depends on FanMode (00:20) - 07:20 already encodes "off" (00) directly.
 std::string BroanComponent::ventilationStateToString( uint8_t ventilationState )
@@ -446,18 +458,18 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				uint8_t val = pField->m_value.m_chValue;
 
 #ifdef USE_SELECT
-				// fan_mode's declared options don't include turbo/humidity/ovr -
+				// commanded_fan_mode's declared options don't include turbo/humidity/ovr -
 				// those are exposed separately (turbo switch, override_remaining/
 				// turbo_remaining sensors). Publishing one of them here would be
 				// rejected by select::publish_state() as an invalid option (logged
 				// as an error) since it validates against the declared option
 				// list. Simplest fix: only publish values that are actually
 				// selectable.
-				if( fan_mode_select_ &&
+				if( commanded_fan_mode_select_ &&
 				    val != BroanFanMode::Turbo &&
 				    val != BroanFanMode::Humidity &&
 				    val != BroanFanMode::Ovr )
-					fan_mode_select_->publish_state( fanModeToString( val ) );
+					commanded_fan_mode_select_->publish_state( fanModeToString( val ) );
 #endif
 
 #ifdef USE_SWITCH
@@ -477,13 +489,30 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 #endif
 			}
 			break;
+
+			case BroanField::BaseMode:
+			{
+				// The fallback mode the ERV reverts to once an override ends. Never
+				// itself holds an override value (Turbo/Absence/Deshumidistat/Ovr) -
+				// confirmed by capture that this register stays on the underlying
+				// "normal" mode throughout. Reuses fanModeToString() since the same
+				// off/smart/intermittent/exchange*/recirculation* values apply here
+				// too - the only ambiguous case (0x0B, exchange_med vs
+				// exchange_adjustable) is resolved the same way via m_bAdjustableSpeed.
+#ifdef USE_TEXT_SENSOR
+				if( base_fan_mode_text_sensor_ )
+					base_fan_mode_text_sensor_->publish_state( fanModeToString( pField->m_value.m_chValue ) );
+#endif
+			}
+			break;
+
 			case BroanField::VentilationState:
 			{
 				uint8_t ventState = pField->m_value.m_chValue;
 
 #ifdef USE_TEXT_SENSOR
-				if( current_mode_text_sensor_ )
-					current_mode_text_sensor_->publish_state( ventilationStateToString( ventState ) );
+				if( ventilation_state_text_sensor_ )
+					ventilation_state_text_sensor_->publish_state( ventilationStateToString( ventState ) );
 #endif
 
 #ifdef USE_SENSOR
@@ -935,12 +964,12 @@ void BroanComponent::publishBusDisconnected()
 	if( override_remaining_sensor_ ) override_remaining_sensor_->publish_state(NAN);
 #endif
 
-	// current_mode has no NAN equivalent (TextSensor::set_has_state(false) alone
+	// ventilation_state has no NAN equivalent (TextSensor::set_has_state(false) alone
 	// wouldn't notify HA in real time - a genuine publish_state() call is needed).
 	// "unknown" acts as a sentinel value: not HA's native "unavailable" badge,
 	// but an explicit state indicating the data is no longer fresh.
 #ifdef USE_TEXT_SENSOR
-	if( current_mode_text_sensor_ ) current_mode_text_sensor_->publish_state("unknown");
+	if( ventilation_state_text_sensor_ ) ventilation_state_text_sensor_->publish_state("unknown");
 #endif
 }
 

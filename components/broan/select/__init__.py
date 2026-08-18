@@ -8,15 +8,18 @@ from esphome.const import (
 
 from .. import CONF_BROAN_ID, BroanComponent, broan_ns
 
-FanModeSelect = broan_ns.class_("FanModeSelect", select.Select)
+CommandedFanModeSelect = broan_ns.class_("CommandedFanModeSelect", select.Select)
 
-CONF_FAN_MODE = 'fan_mode'
+CONF_COMMANDED_FAN_MODE = 'commanded_fan_mode'
 
 CONFIG_SCHEMA = {
     cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
 
-    cv.Optional(CONF_FAN_MODE): select.select_schema(
-        FanModeSelect,
+    # What's commanded (00:20) - not necessarily what the ERV is doing right now
+    # underneath an override. See text_sensor base_fan_mode (02:20) and
+    # ventilation_state (07:20) for that.
+    cv.Optional(CONF_COMMANDED_FAN_MODE): select.select_schema(
+        CommandedFanModeSelect,
         entity_category=ENTITY_CATEGORY_CONFIG,
         icon=ICON_GAUGE,
     ),
@@ -25,9 +28,9 @@ CONFIG_SCHEMA = {
 
 async def to_code(config):
     broan_component = await cg.get_variable(config[CONF_BROAN_ID])
-    if fan_mode_config := config.get(CONF_FAN_MODE):
+    if commanded_fan_mode_config := config.get(CONF_COMMANDED_FAN_MODE):
         s = await select.new_select(
-            fan_mode_config,
+            commanded_fan_mode_config,
             options=[
                 "off",
                 "smart",
@@ -43,4 +46,4 @@ async def to_code(config):
             ],
         )
         await cg.register_parented(s, config[CONF_BROAN_ID])
-        cg.add(broan_component.set_fan_mode_select(s))
+        cg.add(broan_component.set_commanded_fan_mode_select(s))

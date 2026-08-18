@@ -308,6 +308,22 @@ void BroanComponent::setListenOnly( bool enable )
 {
 	ESP_LOGI("broan_control", "Set listen only: %s", enable ? "ON" : "OFF");
 	m_bListenOnly = enable;
+
+	// Confirmed by capture (2026-08-14): the physical wall controller's own
+	// polling cycle never requests CFM/RPM at all (03:10/04:10/05:10/06:10) -
+	// a completely different, much larger set of registers is used for whatever
+	// its own display shows instead. While listening in on it, we'll never see
+	// these updated, so mark them unavailable right away rather than leaving
+	// stale values displayed indefinitely.
+#ifdef USE_SENSOR
+	if( enable )
+	{
+		if( supply_cfm_sensor_ ) supply_cfm_sensor_->publish_state(NAN);
+		if( exhaust_cfm_sensor_ ) exhaust_cfm_sensor_->publish_state(NAN);
+		if( supply_rpm_sensor_ ) supply_rpm_sensor_->publish_state(NAN);
+		if( exhaust_rpm_sensor_ ) exhaust_rpm_sensor_->publish_state(NAN);
+	}
+#endif
 }
 
 }  // namespace broan

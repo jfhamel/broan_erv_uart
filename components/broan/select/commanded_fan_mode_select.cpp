@@ -1,9 +1,9 @@
-#include "fan_mode_select.h"
+#include "commanded_fan_mode_select.h"
 
 namespace esphome {
 namespace broan {
 
-void FanModeSelect::control(const std::string &value)
+void CommandedFanModeSelect::control(const std::string &value)
 {
 	this->publish_state(value);
 	this->parent_->setFanMode( value );

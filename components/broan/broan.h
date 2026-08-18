@@ -49,8 +49,10 @@ namespace broan {
 #define FILTER_LIFE_MAX 7884000
 
 //#define SCAN_UNKNOWN 1
-// LISTEN_ONLY is no longer a compile-time flag - see the listen_only switch
-// and m_bListenOnly instead, which allow toggling this at runtime from HA.
+// LISTEN_ONLY is no longer a compile-time flag - see setListenOnly() and
+// m_bListenOnly instead, callable directly from YAML (switch/select template,
+// a lambda, etc) to toggle this at runtime from HA without needing a dedicated
+// C++ entity class in this component.
 
 template<typename T>
 concept BroanFieldTypes = 	std::is_same_v<T, float> ||
@@ -210,11 +212,12 @@ class BroanComponent : public Component, public uart::UARTDevice
 #endif
 
 #ifdef USE_TEXT_SENSOR
-	SUB_TEXT_SENSOR(current_mode)
+	SUB_TEXT_SENSOR(ventilation_state)
+	SUB_TEXT_SENSOR(base_fan_mode)
 #endif
 
 #ifdef USE_SELECT
-	SUB_SELECT(fan_mode)
+	SUB_SELECT(commanded_fan_mode)
 #endif
 
 #ifdef USE_NUMBER
@@ -231,7 +234,6 @@ class BroanComponent : public Component, public uart::UARTDevice
 #ifdef USE_SWITCH
   SUB_SWITCH(humidity_control)
   SUB_SWITCH(turbo)
-  SUB_SWITCH(listen_only)
 #endif
 
 public:
