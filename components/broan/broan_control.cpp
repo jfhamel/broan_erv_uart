@@ -325,19 +325,23 @@ void BroanComponent::setListenOnly( bool enable )
 	}
 	else
 	{
-		// Returning to ESP32 control: indoor_temperature/indoor_humidity may
-		// currently be showing whatever the wall controller last broadcast while
-		// we were listening in - reclaim them right away with the last genuine
-		// value we got from HA (setCurrentHumidity()/setCurrentTemperature()),
-		// rather than waiting for the HA source sensor to happen to change again.
+		// Returning to ESP32 control: the ERV may still be holding whatever value
+		// the wall controller last wrote to it (04:50/05:50), and indoor_temperature/
+		// indoor_humidity in HA may still be showing it too - reclaim both right
+		// away with the last genuine value we got from HA, rather than waiting for
+		// the HA source sensor to happen to change again or for the next periodic
+		// broadcast (up to ENVIRONMENT_BROADCAST_RATE later). Calls the full
+		// setCurrentHumidity()/setCurrentTemperature() (not just publish_state())
+		// so this actually writes fresh values to the ERV too, not just the local
+		// HA-facing display - matters for Smart mode, which uses these internally.
 		// m_flLastHumidity/m_flLastTemperature only ever reflect real HA-sourced
 		// values, never the overheard wall controller ones - see the
 		// ControllerHumidity/ControllerTemperature cases in parseBroanFields(),
 		// which publish directly without touching these.
-		if( m_bHaveHumidity && indoor_humidity_sensor_ )
-			indoor_humidity_sensor_->publish_state( m_flLastHumidity );
-		if( m_bHaveTemperature && indoor_temperature_sensor_ )
-			indoor_temperature_sensor_->publish_state( m_flLastTemperature );
+		if( m_bHaveHumidity )
+			setCurrentHumidity( m_flLastHumidity );
+		if( m_bHaveTemperature )
+			setCurrentTemperature( m_flLastTemperature );
 	}
 #endif
 }
