@@ -188,8 +188,24 @@ void BroanComponent::setHumiditySetpoint( float humidity ) {
 }
 
 void BroanComponent::setCurrentHumidity( float humidity ) {
+	// Remembered regardless of mode, so the freshest HA-sourced value is ready
+	// to restore the moment we're back in command mode (see setListenOnly()).
+	m_flLastHumidity = humidity;
+	m_bHaveHumidity = true;
+
+	// While listening in on a real wall controller, it's the source of truth
+	// right now - writing our own HA source sensor's value here (to the wire
+	// or even just the local indoor_humidity display) would fight with what
+	// it's actually broadcasting. Confirmed by capture: without this guard,
+	// indoor_humidity visibly spikes to our value the instant the HA sensor
+	// changes, then gets corrected back down moments later once the wall
+	// controller's own broadcast is overheard again (see the
+	// ControllerHumidity case in parseBroanFields()).
+	if( m_bListenOnly )
+		return;
+
 	std::vector<BroanField_t> vecFields;
-  
+
 	ESP_LOGI("broan_control", "Set current humidity: %0.1f%%", humidity);
 
 	vecFields.push_back( m_vecFields[ControllerHumidity].copyForUpdate( humidity ) );
@@ -197,10 +213,7 @@ void BroanComponent::setCurrentHumidity( float humidity ) {
 
 	writeRegisters( vecFields );
 
-	// Remembers the value for periodic re-broadcast (see runTasks()) and pushes the
-	// next automatic send back out, since we just did one now.
-	m_flLastHumidity = humidity;
-	m_bHaveHumidity = true;
+	// Pushes the next automatic re-broadcast back out, since we just did one now.
 	m_unLastEnvironmentBroadcast = millis();
 
 	// We already have the value in hand - no need to wait for a read-back that will
@@ -212,6 +225,13 @@ void BroanComponent::setCurrentHumidity( float humidity ) {
 }
 
 void BroanComponent::setCurrentTemperature( float temperature ) {
+	m_flLastTemperature = temperature;
+	m_bHaveTemperature = true;
+
+	// Same reasoning as setCurrentHumidity() above.
+	if( m_bListenOnly )
+		return;
+
 	std::vector<BroanField_t> vecFields;
 
 	ESP_LOGI("broan_control", "Set current temperature: %0.1f C", temperature);
@@ -221,8 +241,6 @@ void BroanComponent::setCurrentTemperature( float temperature ) {
 
 	writeRegisters( vecFields );
 
-	m_flLastTemperature = temperature;
-	m_bHaveTemperature = true;
 	m_unLastEnvironmentBroadcast = millis();
 
 #ifdef USE_SENSOR
