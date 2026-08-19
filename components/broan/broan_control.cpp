@@ -323,6 +323,22 @@ void BroanComponent::setListenOnly( bool enable )
 		if( supply_rpm_sensor_ ) supply_rpm_sensor_->publish_state(NAN);
 		if( exhaust_rpm_sensor_ ) exhaust_rpm_sensor_->publish_state(NAN);
 	}
+	else
+	{
+		// Returning to ESP32 control: indoor_temperature/indoor_humidity may
+		// currently be showing whatever the wall controller last broadcast while
+		// we were listening in - reclaim them right away with the last genuine
+		// value we got from HA (setCurrentHumidity()/setCurrentTemperature()),
+		// rather than waiting for the HA source sensor to happen to change again.
+		// m_flLastHumidity/m_flLastTemperature only ever reflect real HA-sourced
+		// values, never the overheard wall controller ones - see the
+		// ControllerHumidity/ControllerTemperature cases in parseBroanFields(),
+		// which publish directly without touching these.
+		if( m_bHaveHumidity && indoor_humidity_sensor_ )
+			indoor_humidity_sensor_->publish_state( m_flLastHumidity );
+		if( m_bHaveTemperature && indoor_temperature_sensor_ )
+			indoor_temperature_sensor_->publish_state( m_flLastTemperature );
+	}
 #endif
 }
 
