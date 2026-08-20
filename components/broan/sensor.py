@@ -8,7 +8,7 @@ from esphome.const import (
     ENTITY_CATEGORY_DIAGNOSTIC,
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_HUMIDITY,
-    ICON_POWER,
+    ICON_FLASH,
     ICON_THERMOMETER,
     ICON_AIR_FILTER,
     ICON_FAN,
@@ -44,7 +44,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
         cv.Optional(CONF_POWER): sensor.sensor_schema(
             device_class=DEVICE_CLASS_POWER,
-            icon=ICON_POWER,
+            icon=ICON_FLASH,
             unit_of_measurement=UNIT_WATT,
         ),
         cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
