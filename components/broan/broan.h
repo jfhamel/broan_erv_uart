@@ -225,6 +225,7 @@ class BroanComponent : public Component, public uart::UARTDevice
 	SUB_NUMBER(humidity_setpoint)
 	SUB_NUMBER(intermittent_period)
 	SUB_NUMBER(turbo_duration)
+	SUB_NUMBER(filter_life_reset)
 #endif
 
 #ifdef USE_BUTTON
@@ -332,6 +333,7 @@ public:
 	void setFanSpeed( float speed );
 	void setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, float flTargetCFM );
 	void resetFilter();
+	void setFilterLife( uint32_t days );
 	void setHumidityControl( bool enable );
 	void setHumiditySetpoint( float humidity );
 	void setCurrentHumidity( float humidity );

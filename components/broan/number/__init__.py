@@ -9,12 +9,14 @@ from esphome.const import (
     ICON_FAN,
     ICON_WATER,
     ICON_TIMER,
+    ICON_AIR_FILTER,
     UNIT_PERCENT,
     UNIT_MINUTE,
 )
 
 UNIT_CFM = "CFM"
 UNIT_PERIOD = "Period"
+UNIT_DAY = "d"
 
 from .. import CONF_BROAN_ID, BroanComponent, broan_ns
 
@@ -22,11 +24,13 @@ FanSpeedNumber = broan_ns.class_("FanSpeedNumber", number.Number)
 HumiditySetpointNumber = broan_ns.class_("HumiditySetpointNumber", number.Number)
 IntermittentPeriodNumber = broan_ns.class_("IntermittentPeriodNumber", number.Number)
 TurboDurationNumber = broan_ns.class_("TurboDurationNumber", number.Number)
+FilterLifeResetNumber = broan_ns.class_("FilterLifeResetNumber", number.Number)
 
 CONF_FAN_SPEED = "fan_speed"
 CONF_HUMIDITY_SETPOINT = "humidity_setpoint"
 CONF_INT_PERIOD = "intermittent_period"
 CONF_TURBO_DURATION = "turbo_duration"
+CONF_FILTER_LIFE_RESET = "filter_life_reset"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -62,6 +66,16 @@ CONFIG_SCHEMA = cv.Schema(
             entity_category=ENTITY_CATEGORY_CONFIG,
             unit_of_measurement=UNIT_MINUTE,
             icon=ICON_TIMER,
+        ),
+        # Sets the filter's remaining life to an arbitrary number of days -
+        # same mechanism as the filter_reset button (which always resets to a
+        # fixed 3 months), just with a configurable value instead. Doesn't read
+        # back a live remaining count - see the filter_life sensor for that.
+        cv.Optional(CONF_FILTER_LIFE_RESET): number.number_schema(
+            FilterLifeResetNumber,
+            entity_category=ENTITY_CATEGORY_CONFIG,
+            unit_of_measurement=UNIT_DAY,
+            icon=ICON_AIR_FILTER,
         ),
     }
 )
@@ -100,3 +114,12 @@ async def to_code(config):
         )
         await cg.register_parented(t, config[CONF_BROAN_ID])
         cg.add(broan_component.set_turbo_duration_number(t))
+
+    if filter_life_reset_config := config.get(CONF_FILTER_LIFE_RESET):
+        # Days, 1-365. Picking a value writes it immediately (see
+        # FilterLifeResetNumber::control()) - there's no separate "apply" step.
+        f = await number.new_number(
+            filter_life_reset_config, min_value=1, max_value=365, step=1
+        )
+        await cg.register_parented(f, config[CONF_BROAN_ID])
+        cg.add(broan_component.set_filter_life_reset_number(f))

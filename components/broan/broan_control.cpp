@@ -155,6 +155,28 @@ void BroanComponent::resetFilter()
 	writeRegisters( vecFields );
 }
 
+void BroanComponent::setFilterLife( uint32_t days )
+{
+	// Same mechanism as resetFilter() (fixed 3-month/FILTER_LIFE_MAX reset), just
+	// with an arbitrary day count instead - e.g. for a filter with a different
+	// rated lifespan than Broan's own default, or to set a specific remaining
+	// value rather than a full reset.
+	std::vector<BroanField_t> vecFields;
+
+	uint32_t unNewFilterLife = days * 24u * 60u * 60u;
+	uint8_t unFilterReset = 0;
+
+	ESP_LOGI("broan_control", "Set filter life to %u days (%u s)", days, unNewFilterLife);
+
+	vecFields.push_back( m_vecFields[FilterLife].copyForUpdate( unNewFilterLife ) );
+	vecFields.push_back( m_vecFields[FilterReset].copyForUpdate( unFilterReset ) );
+
+	m_vecFields[FilterReset].markDirty();
+	m_vecFields[FilterLife].markDirty();
+
+	writeRegisters( vecFields );
+}
+
 void BroanComponent::setHumidityControl( bool enable ) {
 	std::vector<BroanField_t> vecFields;
 
