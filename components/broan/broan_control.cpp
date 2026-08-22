@@ -142,7 +142,7 @@ void BroanComponent::resetFilter()
 	std::vector<BroanField_t> vecFields;
 
 	uint32_t unNewFilterLife = FILTER_LIFE_MAX;
-	uint8_t unFilterReset = 0;
+	uint8_t unFilterReset = 1;
 
 	ESP_LOGI("broan_control", "Reset filter life to %u s", unNewFilterLife);
 
@@ -164,7 +164,7 @@ void BroanComponent::setFilterLife( uint32_t days )
 	std::vector<BroanField_t> vecFields;
 
 	uint32_t unNewFilterLife = days * 24u * 60u * 60u;
-	uint8_t unFilterReset = 0;
+	uint8_t unFilterReset = 1;
 
 	ESP_LOGI("broan_control", "Set filter life to %u days (%u s)", days, unNewFilterLife);
 
