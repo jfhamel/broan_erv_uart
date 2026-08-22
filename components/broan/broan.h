@@ -230,11 +230,11 @@ class BroanComponent : public Component, public uart::UARTDevice
 	SUB_NUMBER(humidity_setpoint)
 	SUB_NUMBER(intermittent_period)
 	SUB_NUMBER(turbo_duration)
-	SUB_NUMBER(filter_life_reset)
+	SUB_NUMBER(filter_life_reset_duration)
 #endif
 
 #ifdef USE_BUTTON
-  SUB_BUTTON(filter_reset)
+  SUB_BUTTON(filter_life_reset)
 #endif
 
 #ifdef USE_SWITCH
@@ -338,8 +338,8 @@ public:
 	void setFanMode( std::string mode );
 	void setFanSpeed( float speed );
 	void setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, float flTargetCFM );
-	void resetFilter();
 	void setFilterLife( uint32_t days );
+	void applyFilterLifeReset(); // Reads filter_life_reset_duration_number_->state (months) and calls setFilterLife() - public bridge, since that pointer itself is protected (see SUB_NUMBER)
 	void setHumidityControl( bool enable );
 	void setHumiditySetpoint( float humidity );
 	void setCurrentHumidity( float humidity );

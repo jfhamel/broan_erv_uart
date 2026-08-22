@@ -8,9 +8,9 @@ class BroanComponent;
 namespace esphome {
 namespace broan {
 
-class FilterLifeResetNumber : public number::Number, public Parented<BroanComponent> {
+class FilterLifeResetDurationNumber : public number::Number, public Parented<BroanComponent> {
  public:
-  FilterLifeResetNumber() = default;
+  FilterLifeResetDurationNumber() = default;
 
  protected:
   void control(float value) override;

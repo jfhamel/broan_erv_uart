@@ -137,36 +137,15 @@ void BroanComponent::setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, 
 	writeRegisters( vecFields );
 }
 
-void BroanComponent::resetFilter()
+void BroanComponent::setFilterLife( uint32_t days )
 {
 	// Two-message sequence confirmed by capture (2026-08-19), matching exactly
 	// what the wall controller does: stage the desired value in FilterLifeStage
 	// (09:30) FIRST, THEN trigger FilterReset (01:30=1) combined with FilterLife
-	// (08:30) in a second message. A single combined write (what this used to do)
-	// was accepted on the wire but silently had no effect - the ERV appears to
-	// need the staged value present before it'll apply anything other than its
-	// own default.
-	uint32_t unNewFilterLife = FILTER_LIFE_MAX;
-
-	ESP_LOGI("broan_control", "Reset filter life to %u s", unNewFilterLife);
-
-	std::vector<BroanField_t> vecStage;
-	vecStage.push_back( m_vecFields[FilterLifeStage].copyForUpdate( unNewFilterLife ) );
-	m_vecFields[FilterLifeStage].markDirty();
-	writeRegisters( vecStage );
-
-	std::vector<BroanField_t> vecApply;
-	vecApply.push_back( m_vecFields[FilterReset].copyForUpdate( (uint8_t)1 ) );
-	vecApply.push_back( m_vecFields[FilterLife].copyForUpdate( unNewFilterLife ) );
-	m_vecFields[FilterReset].markDirty();
-	m_vecFields[FilterLife].markDirty();
-	writeRegisters( vecApply );
-}
-
-void BroanComponent::setFilterLife( uint32_t days )
-{
-	// Same two-message sequence as resetFilter() above, just with an arbitrary
-	// day count instead of the fixed FILTER_LIFE_MAX default.
+	// (08:30) in a second message. A single combined write (what an earlier
+	// version of this did) was accepted on the wire but silently had no effect -
+	// the ERV appears to need the staged value present before it'll apply
+	// anything other than its own default.
 	uint32_t unNewFilterLife = days * 24u * 60u * 60u;
 
 	ESP_LOGI("broan_control", "Set filter life to %u days (%u s)", days, unNewFilterLife);
@@ -182,6 +161,22 @@ void BroanComponent::setFilterLife( uint32_t days )
 	m_vecFields[FilterReset].markDirty();
 	m_vecFields[FilterLife].markDirty();
 	writeRegisters( vecApply );
+}
+
+void BroanComponent::applyFilterLifeReset()
+{
+	// Public bridge for FilterLifeResetButton::press_action(): the pointer
+	// itself (filter_life_reset_duration_number_) is protected (see SUB_NUMBER
+	// in broan.h), so an external entity class can't read ->state directly -
+	// this method does it from inside BroanComponent, which has access.
+	float months = 3.f; // fallback if the number isn't configured in YAML
+
+#ifdef USE_NUMBER
+	if( filter_life_reset_duration_number_ )
+		months = filter_life_reset_duration_number_->state;
+#endif
+
+	setFilterLife( (uint32_t)( months * 30.f ) );
 }
 
 void BroanComponent::setHumidityControl( bool enable ) {

@@ -8,9 +8,9 @@ class BroanComponent;
 namespace esphome {
 namespace broan {
 
-class FilterResetButton : public button::Button, public Parented<BroanComponent> {
+class FilterLifeResetButton : public button::Button, public Parented<BroanComponent> {
  public:
-  FilterResetButton() = default;
+  FilterLifeResetButton() = default;
 
  protected:
   void press_action() override;

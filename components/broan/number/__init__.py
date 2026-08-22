@@ -16,7 +16,7 @@ from esphome.const import (
 
 UNIT_CFM = "CFM"
 UNIT_PERIOD = "Period"
-UNIT_DAY = "d"
+UNIT_MONTH = "months"
 
 from .. import CONF_BROAN_ID, BroanComponent, broan_ns
 
@@ -24,13 +24,15 @@ FanSpeedNumber = broan_ns.class_("FanSpeedNumber", number.Number)
 HumiditySetpointNumber = broan_ns.class_("HumiditySetpointNumber", number.Number)
 IntermittentPeriodNumber = broan_ns.class_("IntermittentPeriodNumber", number.Number)
 TurboDurationNumber = broan_ns.class_("TurboDurationNumber", number.Number)
-FilterLifeResetNumber = broan_ns.class_("FilterLifeResetNumber", number.Number)
+FilterLifeResetDurationNumber = broan_ns.class_(
+    "FilterLifeResetDurationNumber", number.Number
+)
 
 CONF_FAN_SPEED = "fan_speed"
 CONF_HUMIDITY_SETPOINT = "humidity_setpoint"
 CONF_INT_PERIOD = "intermittent_period"
 CONF_TURBO_DURATION = "turbo_duration"
-CONF_FILTER_LIFE_RESET = "filter_life_reset"
+CONF_FILTER_LIFE_RESET_DURATION = "filter_life_reset_duration"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -67,14 +69,14 @@ CONFIG_SCHEMA = cv.Schema(
             unit_of_measurement=UNIT_MINUTE,
             icon=ICON_TIMER,
         ),
-        # Sets the filter's remaining life to an arbitrary number of days -
-        # same mechanism as the filter_reset button (which always resets to a
-        # fixed 3 months), just with a configurable value instead. Doesn't read
-        # back a live remaining count - see the filter_life sensor for that.
-        cv.Optional(CONF_FILTER_LIFE_RESET): number.number_schema(
-            FilterLifeResetNumber,
+        # Pure value holder (matches the wall controller, which offers 1-24
+        # months) - picking a value here doesn't write anything on its own, it's
+        # only applied when the filter_life_reset button is pressed (see
+        # BroanComponent::applyFilterLifeReset()).
+        cv.Optional(CONF_FILTER_LIFE_RESET_DURATION): number.number_schema(
+            FilterLifeResetDurationNumber,
             entity_category=ENTITY_CATEGORY_CONFIG,
-            unit_of_measurement=UNIT_DAY,
+            unit_of_measurement=UNIT_MONTH,
             icon=ICON_AIR_FILTER,
         ),
     }
@@ -115,11 +117,10 @@ async def to_code(config):
         await cg.register_parented(t, config[CONF_BROAN_ID])
         cg.add(broan_component.set_turbo_duration_number(t))
 
-    if filter_life_reset_config := config.get(CONF_FILTER_LIFE_RESET):
-        # Days, 1-365. Picking a value writes it immediately (see
-        # FilterLifeResetNumber::control()) - there's no separate "apply" step.
+    if filter_life_reset_duration_config := config.get(CONF_FILTER_LIFE_RESET_DURATION):
+        # Months, 1-24 - matches the wall controller's own range.
         f = await number.new_number(
-            filter_life_reset_config, min_value=1, max_value=365, step=1
+            filter_life_reset_duration_config, min_value=1, max_value=24, step=1
         )
         await cg.register_parented(f, config[CONF_BROAN_ID])
-        cg.add(broan_component.set_filter_life_reset_number(f))
+        cg.add(broan_component.set_filter_life_reset_duration_number(f))
