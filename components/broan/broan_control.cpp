@@ -139,42 +139,49 @@ void BroanComponent::setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, 
 
 void BroanComponent::resetFilter()
 {
-	std::vector<BroanField_t> vecFields;
-
+	// Two-message sequence confirmed by capture (2026-08-19), matching exactly
+	// what the wall controller does: stage the desired value in FilterLifeStage
+	// (09:30) FIRST, THEN trigger FilterReset (01:30=1) combined with FilterLife
+	// (08:30) in a second message. A single combined write (what this used to do)
+	// was accepted on the wire but silently had no effect - the ERV appears to
+	// need the staged value present before it'll apply anything other than its
+	// own default.
 	uint32_t unNewFilterLife = FILTER_LIFE_MAX;
-	uint8_t unFilterReset = 1;
 
 	ESP_LOGI("broan_control", "Reset filter life to %u s", unNewFilterLife);
 
-	vecFields.push_back( m_vecFields[FilterLife].copyForUpdate( unNewFilterLife ) );
-	vecFields.push_back( m_vecFields[FilterReset].copyForUpdate( unFilterReset ) );
+	std::vector<BroanField_t> vecStage;
+	vecStage.push_back( m_vecFields[FilterLifeStage].copyForUpdate( unNewFilterLife ) );
+	m_vecFields[FilterLifeStage].markDirty();
+	writeRegisters( vecStage );
 
+	std::vector<BroanField_t> vecApply;
+	vecApply.push_back( m_vecFields[FilterReset].copyForUpdate( (uint8_t)1 ) );
+	vecApply.push_back( m_vecFields[FilterLife].copyForUpdate( unNewFilterLife ) );
 	m_vecFields[FilterReset].markDirty();
 	m_vecFields[FilterLife].markDirty();
-
-	writeRegisters( vecFields );
+	writeRegisters( vecApply );
 }
 
 void BroanComponent::setFilterLife( uint32_t days )
 {
-	// Same mechanism as resetFilter() (fixed 3-month/FILTER_LIFE_MAX reset), just
-	// with an arbitrary day count instead - e.g. for a filter with a different
-	// rated lifespan than Broan's own default, or to set a specific remaining
-	// value rather than a full reset.
-	std::vector<BroanField_t> vecFields;
-
+	// Same two-message sequence as resetFilter() above, just with an arbitrary
+	// day count instead of the fixed FILTER_LIFE_MAX default.
 	uint32_t unNewFilterLife = days * 24u * 60u * 60u;
-	uint8_t unFilterReset = 1;
 
 	ESP_LOGI("broan_control", "Set filter life to %u days (%u s)", days, unNewFilterLife);
 
-	vecFields.push_back( m_vecFields[FilterLife].copyForUpdate( unNewFilterLife ) );
-	vecFields.push_back( m_vecFields[FilterReset].copyForUpdate( unFilterReset ) );
+	std::vector<BroanField_t> vecStage;
+	vecStage.push_back( m_vecFields[FilterLifeStage].copyForUpdate( unNewFilterLife ) );
+	m_vecFields[FilterLifeStage].markDirty();
+	writeRegisters( vecStage );
 
+	std::vector<BroanField_t> vecApply;
+	vecApply.push_back( m_vecFields[FilterReset].copyForUpdate( (uint8_t)1 ) );
+	vecApply.push_back( m_vecFields[FilterLife].copyForUpdate( unNewFilterLife ) );
 	m_vecFields[FilterReset].markDirty();
 	m_vecFields[FilterLife].markDirty();
-
-	writeRegisters( vecFields );
+	writeRegisters( vecApply );
 }
 
 void BroanComponent::setHumidityControl( bool enable ) {

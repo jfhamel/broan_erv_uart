@@ -150,6 +150,11 @@ enum BroanField
 	// Maintenance
 	FilterReset, // Set to 1 to reset
 	FilterLife, // default 7884000 / 3 months. Seconds.
+	FilterLifeStage, // 09:30. Confirmed by capture (2026-08-19): the wall controller
+	                 // writes the desired seconds value here FIRST, before FilterReset
+	                 // - appears to "stage" the value FilterReset then applies to
+	                 // FilterLife, rather than FilterReset alone accepting an arbitrary
+	                 // FilterLife value directly.
 
 	// Unknown fields that look interesting but aren't understood nor read by controllers
 	UnknownA,
@@ -290,6 +295,7 @@ public:
 		// Maintenance
 		{ 0x01, 0x30, BroanFieldType::Byte, {0}, UPDATE_RATE_SLOW }, // Set to 0x01 to reset filter
 		{ 0x08, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_SLOW }, // Number of seconds until filter needs reset. Set along side reset byte
+		{ 0x09, 0x30, BroanFieldType::Int, {0} }, // FilterLifeStage - write-only, staged value FilterReset then applies to FilterLife
 
 
 		// Interesting fields found by scan
