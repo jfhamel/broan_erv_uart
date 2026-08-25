@@ -34,21 +34,20 @@ namespace broan {
 #define UPDATE_RATE_SLOW 60000 // 1 minute
 #define UPDATE_RATE_NEVER 0xFFFFFFFF
 
-// Wall controller broadcast cadence observed for humidity/temperature (04:50/05:50)
-// - confirmed by capture, ~20.3s regardless of whether the value changed.
+// Humidity and temperature refresh rate to mimic wall controller
 #define ENVIRONMENT_BROADCAST_RATE 20300
 
-// If no valid response from the ERV since this delay, the bus is considered
-// disconnected and NAN (unavailable in HA) is published on numeric sensors instead
-// of leaving the last known values displayed indefinitely.
+// Timeout delay to consider the ERV offline and publish "Unavailable" for sensors.
 #define BUS_TIMEOUT 60000
 
 #define MAX_REQUEST_SIZE 10
 #define INVALID_FIELD 0xFFFFFF
 
-#define FILTER_LIFE_MAX 7884000
+// ***** À revalider
+// #define FILTER_LIFE_MAX 7884000  not used anymore. See setFilterLife
 
 //#define SCAN_UNKNOWN 1
+
 // LISTEN_ONLY is no longer a compile-time flag - see setListenOnly() and
 // m_bListenOnly instead, callable directly from YAML (switch/select template,
 // a lambda, etc) to toggle this at runtime from HA without needing a dedicated
@@ -74,21 +73,20 @@ enum BroanCFMMode
 	Both = BroanCFMMode::Input | BroanCFMMode::Output,
 };
 
-// Values for register 00:20 (commanded mode) *and* 02:20 (base/underlying mode).
-// Confirmed by capturing every mode on the physical wall controller, one at a time.
+// Values for register 00:20 (commanded mode) and 02:20 (base/underlying mode).
 enum BroanFanMode
 {
 	Off = 0x01,
 	Ovr = 0x02,             // Bathroom boost button (dry contact on the OVR terminal). Read-only: never written over RS-485.
 	RecirculateMin = 0x05,
-	Recirculate = 0x06,     // Recirculate Max
+	RecirculateMax = 0x06,
 	RecirculateMed = 0x07,
 	Intermittent = 0x08,
-	ExchangeMin = 0x09,     // Continuous exchange, min speed. Confirmed by capture: speed is NOT adjustable in this mode.
-	ExchangeMax = 0x0a,     // Continuous exchange, max speed. Confirmed by capture: speed is NOT adjustable in this mode.
-	ExchangeMedManual = 0x0b, // Continuous exchange, "medium" tier - the only one with an adjustable CFM target (06:22/08:22).
+	ExchangeMin = 0x09,
+	ExchangeMax = 0x0a,
+	ExchangeMedManual = 0x0b, // Continuous exchange, "medium" and adjustable CFM target (06:22/08:22).
 	Turbo = 0x0c,
-	Humidity = 0x0d,        // Deshumidistat. ERV sets this itself once 0F:22=1 is written; never write it directly.
+	Humidity = 0x0d,
 	Away = 0x0F,            // Absence (weekly presence schedule override)
 	Smart = 0x11,
 };
@@ -115,24 +113,8 @@ enum BroanField
 	ExhaustRPM,
 	TurboRemaining,  // Read-only. Seconds left on the current Turbo/boost timer (register 04:30).
 	OvrRemaining,    // Read-only. Seconds left on the current bathroom (Ovr) boost timer (register 03:30).
-
-	// Candidates for the internal Smart mode exchange/recirculation indicator
-	// (02:20/00:20 don't move when Smart switches internally - the real wall
-	// controller displays this state though, so it MUST be transmitted somewhere).
-	// Picked up from the block of never-activated fields scanned by the original
-	// author (VTSPEEDW) - now actively polled instead of relying on the
-	// brute-force scanner.
-	OverrideActiveFlag,   // 02:30. "Toggles 01<->00 whenever an override (Turbo/Ovr/etc) starts."
-	VentilationState,     // 07:20. Confirmed by capture (2026-08-13): a full state code
-	                      // covering all modes, not just exchange (01) vs recirculation
-	                      // (06/07/08) - see ventilationStateToString() for the full table.
-	                      // Changes reliably in all directions tested, including inside
-	                      // Smart mode, where neither FanMode (00:20) nor BaseMode (02:20)
-	                      // move. Precedes physical airflow (CFM) by several seconds -
-	                      // makes sense, since the real change involves a mechanical damper
-	                      // motor that itself takes several minutes to fully close.
-	IntModeFlag,          // 03:20. "Set to 0 when entering INT mode"
-	SmartVsContinuousFlag,// 08:20. "Set to 0 when entering SMART mode, set to 1 in continuous modes." <- candidat le plus prometteur
+	OverrideActiveFlag,   // 02:30. Toggles 01<->00 whenever an override (Turbo/Ovr/etc) starts.
+	VentilationState,     // 07:20. ERV real ventilation mode, especially usefull to know what it is doing when in smart mode.
 
 	// Speeds
 	CFMIn_Medium,
@@ -144,10 +126,11 @@ enum BroanField
 
 	// Input
 	Heartbeat, // Weird void value that controllers ping every 10s
-	ControllerHumidity,    // Write-only. Current indoor humidity (%) - fed in from whatever instrument you configure in your YAML (a Home Assistant sensor, a probe wired to the ESP32, etc). There is no wall controller left on the bus once the ESP32 is the sole controller, so this can't come from one.
-	ControllerTemperature, // Write-only. Current indoor temperature (C) - same as above: supplied by an external instrument you configure, not read from a wall controller.
+	ControllerHumidity,    // Write-only. Current indoor humidity (%), fed by HA.
+	ControllerTemperature, // Write-only. Current indoor temperature (C) fed by HA
 
 	// Maintenance
+//**** à revoir - Est-ce que FilterLife est vraiment utile
 	FilterReset, // Set to 1 to reset
 	FilterLife, // default 7884000 / 3 months. Seconds.
 	FilterLifeStage, // 09:30. Confirmed by capture (2026-08-19): the wall controller
@@ -243,8 +226,8 @@ class BroanComponent : public Component, public uart::UARTDevice
 #endif
 
 public:
-	const uint8_t m_nServerAddress = 0x10;
-	const uint8_t m_nClientAddress = 0x12;
+	const uint8_t m_nEsp32Address = 0x10;
+	const uint8_t m_nErvAddress = 0x12;
 
 	bool m_bWaitForRemote = false;
 
@@ -270,14 +253,8 @@ public:
 		{ 0x04, 0x10, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // Exhaust RPM
 		{ 0x04, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // TurboRemaining (seconds)
 		{ 0x03, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // OvrRemaining (seconds) - bathroom (Ovr) boost countdown
-
-		// Internal Smart mode exchange/recirculation candidates - see enum comments
-		// above. UPDATE_RATE_FAST to make sure the next transition is captured,
-		// unlike the brute-force scanner which depends on scan cycle timing luck.
 		{ 0x02, 0x30, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // OverrideActiveFlag
 		{ 0x07, 0x20, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // VentilationState
-		{ 0x03, 0x20, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // IntModeFlag
-		{ 0x08, 0x20, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // SmartVsContinuousFlag
 
 		// Speeds
 		{ 0x06, 0x22, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // MED target CFM in.
@@ -289,8 +266,8 @@ public:
 
 		//Input
 		{ 0x00, 0x50, BroanFieldType::Void, {0}, UPDATE_RATE_NEVER }, // Unknown. Controllers regularly write this. Some kind of heartbeat maybe?
-		{ 0x04, 0x50, BroanFieldType::Float, {0}, UPDATE_RATE_NEVER }, // Controller Humidity (Write only) -> published as indoor_humidity
-		{ 0x05, 0x50, BroanFieldType::Float, {0}, UPDATE_RATE_NEVER }, // Controller temperature (Write only) -> published as indoor_temperature
+		{ 0x04, 0x50, BroanFieldType::Float, {0}, UPDATE_RATE_NEVER }, // Controller Humidity (Write only)
+		{ 0x05, 0x50, BroanFieldType::Float, {0}, UPDATE_RATE_NEVER }, // Controller temperature (Write only)
 
 		// Maintenance
 		{ 0x01, 0x30, BroanFieldType::Byte, {0}, UPDATE_RATE_SLOW }, // Set to 0x01 to reset filter
@@ -304,7 +281,6 @@ public:
 
 /*
 		// Unknown fields scanned by the VTSPEEDW
-		// (02:30, 07:20, 03:20, 08:20 moved to the active list above)
 		{ 0x0E, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 1 / 01
 		{ 0x0C, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 1 / 01
 		{ 0x0B, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 1 / 01
@@ -317,10 +293,10 @@ public:
 		{ 0x04, 0x21, BroanFieldType::Byte, {0} }, // Unknown. 0 / 00
 		{ 0x17, 0x00, BroanFieldType::Int, {0} }, // Unknown. NaN / ffffffff
 		{ 0x00, 0x30, BroanFieldType::Byte, {0} }, // Unknown. 0 / 00
-		{ 0x03, 0x30, BroanFieldType::Int, {0} }, // Bathroom (Ovr) boost countdown, seconds. Same shape as 04:30 but for the OVR mode. Read-only.
 		{ 0x07, 0x50, BroanFieldType::Int, {0} }, // Unknown. VTSPEEDW often sets this to -1
-		// (03:20, 08:20 moved to the active list above)
 		{ 0x10, 0x22, BroanFieldType::Byte, {0} }, // Unknown. Written alongside 0F:22 when enabling Humidity control, always seen as 00 so far.
+		{ 0x03, 0x20, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // Set to 0 when entering INT mode
+		{ 0x08, 0x20, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // Set to 0 when entering SMART mode, set to 1 in continuous modes.
 */
 	};
 
@@ -377,12 +353,9 @@ private:
 
 	bool m_bERVReady = false;
 
-	// Whether fan_speed adjustments should actually be sent to the ERV right now.
-	// FanMode=ExchangeMedManual (0x0B) is written for BOTH "exchange_med" (fixed,
-	// no adjustable speed - confirmed by capture, same as min/max) AND
-	// "exchange_adjustable" (same wire value, but the fan_speed number IS applied).
-	// Since both write the identical byte on the wire, this flag is the only way
-	// to tell them apart on our side - it can't be recovered from a bus read alone.
+	// Flag used to diffentiate user choice between exchange_med and echange_adjsutable
+	// as they both share BroanFanMode = ExchangeMedManual = 0x0b, but exchange_med is
+	// fixed speed at 50%.
 	bool m_bAdjustableSpeed = false;
 
 #ifdef SCAN_UNKNOWN
@@ -407,7 +380,7 @@ private:
 	// Internal
 	bool readHeader();
 	bool readMessage();
-	void handleMessage(uint8_t sender, uint8_t target, const std::vector<uint8_t>& message);
+	void handleMessage(uint8_t srcAddress, uint8_t dstAddress, const std::vector<uint8_t>& message);
 	void send(const std::vector<uint8_t>& msg);
 	uint8_t calculateChecksum(uint8_t sender, uint8_t receiver, const std::vector<uint8_t>& message);
 	void replyIfAllowed();

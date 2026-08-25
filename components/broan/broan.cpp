@@ -115,8 +115,8 @@ void BroanComponent::writeRegisters( const std::vector<BroanField_t> &values )
 
 bool BroanComponent::readMessage()
 {
-	uint8_t target = m_vecHeader[1];
-	uint8_t sender = m_vecHeader[2];
+	uint8_t srcAddress = m_vecHeader[1];
+	uint8_t dstAddress = m_vecHeader[2];
 	int len = m_vecHeader[4];
 
 	if( !m_bHaveHeader )
@@ -144,7 +144,7 @@ bool BroanComponent::readMessage()
 	}
 
 	uint8_t checksum = read();
-	uint8_t expected_checksum = calculateChecksum(sender, target, message);
+	uint8_t expected_checksum = calculateChecksum(srcAddress, dstAddress, message);
 	if (checksum != expected_checksum)
 	{
 		ESP_LOGE("broan", "Checksum mismatch: got %02X, expected %02X", checksum, expected_checksum);
@@ -158,7 +158,7 @@ bool BroanComponent::readMessage()
 		return false;
 	}
 
-	handleMessage(sender, target, message);
+	handleMessage(srcAddress, dstAddress, message);
 
 	return true;
 }
@@ -184,28 +184,22 @@ void esp_log_vector_hex(const char* tag, const std::vector<uint8_t>& message) {
     }
 }
 
-void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::vector<uint8_t>& message)
+void BroanComponent::handleMessage(uint8_t srcAddress, uint8_t dstAddress, const std::vector<uint8_t>& message)
 {
-	if( target == m_nServerAddress )
+	if( srcAddress == m_nEsp32Address )
 	{
 		if( message[0] == 0x03 )
 			m_bWaitForRemote = false;
 	}
-	// In command mode (the normal, default case), ignore anything not addressed to
-	// us. In listen-only mode, process everything so we can observe traffic between
-	// a real physical wall controller and the ERV.
-	if( !m_bListenOnly && target != m_nClientAddress ) return;
+	if( !m_bListenOnly && srcAddress != m_nErvAddress ) return;
 
 	int m_nType = message[0];
 	switch (m_nType)
 	{
 		case 0x02:
 		{
-			// Respond to ping - only meaningful if this ping is genuinely addressed
-			// to us. While listening in on a real wall controller's traffic, the
-			// ERV pings IT, not us - reacting to that (and updating our own state
-			// below as if we were pinged) would be wrong, even though send() itself
-			// is already a safe no-op in that case.
+			// Respond to ping
+			// In listenOnly, ping is not adressed to us, so do nothing and return.
 			if( m_bListenOnly )
 				break;
 
@@ -220,9 +214,8 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 		}
 		case 0x04:
 		{
-			// Flow control - same reasoning as 0x02 above: only relevant if this
-			// exchange is genuinely with us, not something we're merely overhearing
-			// between the ERV and a real wall controller.
+			// Flow control
+			// In listenOnly, ESP32 does not need to control the flow.
 			if( m_bListenOnly )
 				break;
 
@@ -244,7 +237,7 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 
 		case 0x41:
 		{
-			// A genuine response from the ERV - it's still there.
+			// Save last alive time.
 			m_unLastValidResponse = millis();
 			m_bBusTimedOut = false;
 
@@ -266,7 +259,7 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 		}
 		case 0x21:
 		{
-			// A genuine response from the ERV - it's still there.
+			// Save last alive time.
 			m_unLastValidResponse = millis();
 			m_bBusTimedOut = false;
 
@@ -277,20 +270,11 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 			break;
 		}
 		case 0x40:
-			// A write request - normally something WE send (never addressed back to
-			// ourselves, so never seen here in normal command mode). While listening
-			// in on a real physical wall controller's traffic though, this is how we
-			// overhear ITS writes to the ERV - notably the periodic indoor humidity/
-			// temperature broadcast (04:50/05:50). Shares the exact same
-			// register+length+data payload layout as a 0x21 response, so
-			// parseBroanFields() handles it identically - see the
-			// ControllerHumidity/ControllerTemperature cases there.
+			// Write request from the wall controller must be decoded in listenOnly mode
+			// especially top get the indoor temperature and humidity
 			parseBroanFields(message);
 			break;
 		case 0x20:
-			// Read request from someone else's controller (seen while listening in
-			// on a real physical wall controller's traffic) - not addressed to us,
-			// nothing to do.
 			break;
 		default:
 		{
@@ -346,13 +330,8 @@ void BroanComponent::queueMessage(std::vector<uint8_t>& message)
 	m_vecSendQueue.push_back(message);
 }
 
-
-// Used for the fan_mode select's displayed state (register 00:20 / commanded mode).
-// Keeps full granularity since this reflects exactly what was written to the ERV.
-// Used for the fan_mode select's displayed state (register 00:20 / commanded mode).
-// Note that ExchangeMedManual (0x0B) is ambiguous on the wire alone: "exchange_med"
-// and "exchange_adjustable" both write this same byte, only m_bAdjustableSpeed (our
-// own side, not recoverable from a bus read) tells them apart.
+// Used to map register 00:20 to string value for select's commanded_fan_mode
+// when publishing current state.
 std::string BroanComponent::fanModeToString( uint8_t value )
 {
 	switch( value )
@@ -368,24 +347,13 @@ std::string BroanComponent::fanModeToString( uint8_t value )
 		case BroanFanMode::Smart: return "smart";
 		case BroanFanMode::RecirculateMin: return "recirculation_min";
 		case BroanFanMode::RecirculateMed: return "recirculation_med";
-		case BroanFanMode::Recirculate: return "recirculation_max";
+		case BroanFanMode::RecirculateMax: return "recirculation_max";
 		default: return "off";
 	}
 }
 
-// Used for the ventilation_state status text sensor. Full table confirmed by
-// capture on 2026-08-13/14, tested across all modes/tiers (internal Smart,
-// Turbo, Deshumidistat, Ovr, Absence, Intermittent - exchange and rest phases,
-// Recirc Min/Med/Max):
-//   00 = off                  04 = exchange (functionally identical to 01,
-//   01 = exchange                  difference not understood at the hardware level)
-//   02 = deshumidistat        05 = override (Ovr / bathroom boost)
-//   03 = turbo                06 = recirculation min
-//                             07 = recirculation max
-//                             08 = recirculation medium
-// ventilation_state deliberately simplifies 01/04 -> "exchange" and 06/07/08 ->
-// "recirculation": it only reflects what the ERV is doing, not at which tier.
-// No longer depends on FanMode (00:20) - 07:20 already encodes "off" (00) directly.
+// Used to map register 07:20 to string value for text sensor
+// ventilation_state.
 std::string BroanComponent::ventilationStateToString( uint8_t ventilationState )
 {
 	switch( ventilationState )
@@ -434,16 +402,9 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 	
 		if( oldVal == pField->m_value.m_nValue )
 			continue;
-
-		// Keeps m_bAdjustableSpeed in sync when the ERV reverts to a different
-		// FanMode on its own (Turbo timer expiring, Absence schedule, etc) - if
-		// FanMode isn't ExchangeMedManual (0x0B) anymore, adjustable speed can't
-		// apply regardless. If it IS 0x0B, leave the flag alone: that byte is
-		// ambiguous on the wire (both "exchange_med" and "exchange_adjustable"
-		// write it), so only our own last explicit selection (set synchronously in
-		// setFanMode()) can tell them apart - a bus read can't recover that.
-		// Kept outside the ifdefs below so it still works even if the
-		// select/number platforms aren't used.
+		// Reset m_bAdjustableSpeed to false if ERV switches to a different mode
+		// as it does not apply.
+		// Intentionally kept apart from the switch case FanMode below to as this is not related to value publishing.
 		if( unField == BroanField::FanMode )
 		{
 			uint8_t val = pField->m_value.m_chValue;
@@ -458,13 +419,8 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				uint8_t val = pField->m_value.m_chValue;
 
 #ifdef USE_SELECT
-				// commanded_fan_mode's declared options don't include turbo/humidity/ovr -
-				// those are exposed separately (turbo switch, override_remaining/
-				// turbo_remaining sensors). Publishing one of them here would be
-				// rejected by select::publish_state() as an invalid option (logged
-				// as an error) since it validates against the declared option
-				// list. Simplest fix: only publish values that are actually
-				// selectable.
+				// Publish commanded_fan_mode for available options only.
+				// Turbo, humidity and Ovr are not available to selection.
 				if( commanded_fan_mode_select_ &&
 				    val != BroanFanMode::Turbo &&
 				    val != BroanFanMode::Humidity &&
@@ -473,9 +429,6 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 #endif
 
 #ifdef USE_SWITCH
-				// The turbo switch reflects reality: on while Turbo is the active
-				// FanMode, off otherwise - including when the ERV reverts on its
-				// own once the timer runs out.
 				if( turbo_switch_ )
 					turbo_switch_->publish_state( val == BroanFanMode::Turbo );
 #endif
@@ -492,13 +445,6 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 
 			case BroanField::BaseMode:
 			{
-				// The fallback mode the ERV reverts to once an override ends. Never
-				// itself holds an override value (Turbo/Absence/Deshumidistat/Ovr) -
-				// confirmed by capture that this register stays on the underlying
-				// "normal" mode throughout. Reuses fanModeToString() since the same
-				// off/smart/intermittent/exchange*/recirculation* values apply here
-				// too - the only ambiguous case (0x0B, exchange_med vs
-				// exchange_adjustable) is resolved the same way via m_bAdjustableSpeed.
 #ifdef USE_TEXT_SENSOR
 				if( base_fan_mode_text_sensor_ )
 					base_fan_mode_text_sensor_->publish_state( fanModeToString( pField->m_value.m_chValue ) );
@@ -516,13 +462,11 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 #endif
 
 #ifdef USE_SENSOR
-				// Immediately re-publishes the outdoor temperature (see the
-				// TemperatureIn case below) right at the moment the state changes,
-				// rather than waiting up to 10s for the next read cycle of 01:E0
-				// to reflect the switch.
+				// Republish outdoor temps (or NAN) upon state change
+				// rather than waiting update cycle (10 sec.)
 				if( temperature_sensor_ )
 				{
-					if( ventState == BroanFanMode::Recirculate )
+					if( ventState == BroanFanMode::RecirculateMax )
 						temperature_sensor_->publish_state(NAN);
 					else
 						temperature_sensor_->publish_state( m_vecFields[TemperatureIn].m_value.m_flValue );
@@ -549,12 +493,9 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 			case BroanField::TemperatureIn:
 				if( !temperature_sensor_ )
 					continue;
-
-				// Recirculation: no outdoor air is admitted, so this sensor only
-				// measures recycled/indoor air - misleading if shown as
-				// "outdoor temperature". Publishes NAN (= unavailable in HA)
-				// instead of this unrepresentative value.
-				if( m_vecFields[VentilationState].m_value.m_chValue == BroanFanMode::Recirculate )
+				
+				// Outdoor temperature is meaningless in recerculation.
+				if( m_vecFields[VentilationState].m_value.m_chValue == BroanFanMode::RecirculateMax )
 					temperature_sensor_->publish_state(NAN);
 				else
 					temperature_sensor_->publish_state(pField->m_value.m_flValue);
@@ -600,13 +541,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 
 			case BroanField::ControllerHumidity:
 			{
-				// Normally write-only (UPDATE_RATE_NEVER, we're the ones who write
-				// this via setCurrentHumidity()). This case only fires while
-				// listen_only is on and we overhear a real physical wall
-				// controller's own broadcast of it to the ERV - publishes it the
-				// same way setCurrentHumidity() does, so indoor_humidity keeps
-				// working seamlessly whether we're the active controller or just
-				// listening in on one.
+				// In listenOnly mode, wall controller publishes indoor humidity so we republish to HA.
 				if( !indoor_humidity_sensor_ )
 					continue;
 
@@ -616,7 +551,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 
 			case BroanField::ControllerTemperature:
 			{
-				// Same as ControllerHumidity above, but for indoor_temperature.
+				// In listenOnly mode, wall controller publishes indoor temprature so we republish to HA.
 				if( !indoor_temperature_sensor_ )
 					continue;
 
@@ -629,8 +564,6 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !turbo_remaining_sensor_ )
 					continue;
 
-				// Only publish if Turbo is the currently active override - avoids
-				// pushing a stale/irrelevant countdown if something else is active.
 				if( m_vecFields[FanMode].m_value.m_chValue == BroanFanMode::Turbo )
 					turbo_remaining_sensor_->publish_state( pField->m_value.m_nValue / 60.f );
 			}
@@ -671,11 +604,6 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !intermittent_period_number_ )
 					continue;
 
-				// The register is in seconds on the wire, the number entity in minutes
-				// (see IntermittentPeriodNumber::control() for the reverse
-				// conversion at write time) - without this, the raw value (e.g. 600
-				// for 10 minutes) would display as-is as if it were already in
-				// minutes, visible on first boot before any interaction.
 				intermittent_period_number_->publish_state(pField->m_value.m_nValue / 60.f);
 			break;
 #endif
@@ -692,16 +620,16 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 		switch( pField->m_nType )
 		{
 			case BroanFieldType::Byte:
-				ESP_LOGVV("broan","%02X%02X is now Byte %02X", nOpcodeHigh, nOpcodeLow, pField->m_value.m_chValue );
+				ESP_LOGD("broan","%02X%02X is now Byte %02X", nOpcodeHigh, nOpcodeLow, pField->m_value.m_chValue );
 				break;
 			case BroanFieldType::Int:
-				ESP_LOGVV("broan","%02X%02X is now Int %i", nOpcodeHigh, nOpcodeLow, pField->m_value.m_nValue );
+				ESP_LOGD("broan","%02X%02X is now Int %i", nOpcodeHigh, nOpcodeLow, pField->m_value.m_nValue );
 				break;
 			case BroanFieldType::Float:
-				ESP_LOGVV("broan","%02X%02X is now Float %f", nOpcodeHigh, nOpcodeLow, pField->m_value.m_flValue );
+				ESP_LOGD("broan","%02X%02X is now Float %f", nOpcodeHigh, nOpcodeLow, pField->m_value.m_flValue );
 				break;
 			case BroanFieldType::Void:
-				ESP_LOGVV("broan","%02X%02X is not set", nOpcodeHigh, nOpcodeLow );
+				ESP_LOGD("broan","%02X%02X is not set", nOpcodeHigh, nOpcodeLow );
 				break;
 		}
     }
@@ -724,11 +652,11 @@ void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLo
 
 
 			if( len == 4)
-				ESP_LOGVV("broan","%02X%02X field is unmapped. Value: %f / %i -->  %f / %i", nOpcodeHigh, nOpcodeLow,
+				ESP_LOGD("broan","%02X%02X field is unmapped. Value: %f / %i -->  %f / %i", nOpcodeHigh, nOpcodeLow,
 					copy.m_value.m_flValue, copy.m_value.m_nValue,
 					m_vecFieldData[kv].m_value.m_flValue, m_vecFieldData[kv].m_value.m_nValue ) ;
 			else if (len == 1)
-				ESP_LOGVV("broan","%02X%02X field is unmapped. Value: %f / %i -->  %f / %i", nOpcodeHigh, nOpcodeLow,
+				ESP_LOGD("broan","%02X%02X field is unmapped. Value: %f / %i -->  %f / %i", nOpcodeHigh, nOpcodeLow,
 					copy.m_value.m_flValue, copy.m_value.m_nValue,
 					m_vecFieldData[kv].m_value.m_flValue, m_vecFieldData[kv].m_value.m_nValue ) ;
 		}
@@ -746,11 +674,11 @@ void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLo
 
 
 		if( len == 4)
-			ESP_LOGVV("broan","%02X%02X field is unmapped. Value: %f / %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_flValue, newField.m_value.m_nValue );
+			ESP_LOGD("broan","%02X%02X field is unmapped. Value: %f / %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_flValue, newField.m_value.m_nValue );
 		else if( len == 1 )
-			ESP_LOGVV("broan","%02X%02X field is unmapped. Value: %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_chValue);
+			ESP_LOGD("broan","%02X%02X field is unmapped. Value: %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_chValue);
 		else
-			ESP_LOGVV("broan","%02X%02X has unhandled field length %i: %s", nOpcodeHigh, nOpcodeLow, len, format_hex_pretty(&message[i], len).c_str() );
+			ESP_LOGD("broan","%02X%02X has unhandled field length %i: %s", nOpcodeHigh, nOpcodeLow, len, format_hex_pretty(&message[i], len).c_str() );
 #ifdef SCAN_UNKNOWN
 		m_vecFieldData[kv] = newField;
 #endif
@@ -761,9 +689,6 @@ void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLo
 
 void BroanComponent::send(const std::vector<uint8_t>& vecMessage)
 {
-	// Never transmit anything while listening in on a real physical wall
-	// controller's traffic - avoids ever having two masters active on the bus
-	// at the same time.
 	if( m_bListenOnly )
 		return;
 
@@ -774,12 +699,12 @@ void BroanComponent::send(const std::vector<uint8_t>& vecMessage)
 	uint8_t alignment = 0x01;
 	uint8_t footer = 0x04;
 	write(header);
-	write(m_nServerAddress);
-	write(m_nClientAddress);
+	write(m_nEsp32Address);
+	write(m_nErvAddress);
 	write(alignment);
 	write((uint8_t)vecMessage.size());
 	for (auto b : vecMessage) write(b);
-	write(calculateChecksum(m_nClientAddress, m_nServerAddress, vecMessage));
+	write(calculateChecksum(m_nErvAddress, m_nEsp32Address, vecMessage));
 	write(footer);
 
 	flush();
@@ -863,11 +788,8 @@ void BroanComponent::runTasks()
 		queueMessage(vecRequest);
 	}
 
-	// Re-broadcasts humidity/temperature every ~20.3s even if the value hasn't
-	// changed, as the physical wall controller does (confirmed by capture).
-	// setCurrentHumidity()/setCurrentTemperature() already push this timer back
-	// whenever a genuine update arrives - this only ensures the ERV keeps
-	// getting a regular signal even if the HA source sensor doesn't change for a while.
+	// Resend last HA humidity and temperature to ERV every 20.3 secondes
+	// as the wall controller does.
 	if( ( m_bHaveHumidity || m_bHaveTemperature ) && time - m_unLastEnvironmentBroadcast > ENVIRONMENT_BROADCAST_RATE )
 	{
 		m_unLastEnvironmentBroadcast = time;
@@ -889,10 +811,8 @@ void BroanComponent::runTasks()
 		writeRegisters( vecFields );
 	}
 
-	// No valid response from the ERV since BUS_TIMEOUT - publishes NAN on
-	// numeric sensors instead of leaving the last known values displayed
-	// indefinitely. m_bBusTimedOut avoids repeating this every loop iteration
-	// while the situation remains unresolved.
+	// Publish NAN to sensors if communicatioin timeout on the bus
+	// so that sensor displays Unavailable rather than the last known value.
 	if( !m_bBusTimedOut && time - m_unLastValidResponse > BUS_TIMEOUT )
 	{
 		m_bBusTimedOut = true;
@@ -946,11 +866,6 @@ void BroanComponent::runTasks()
 
 void BroanComponent::publishBusDisconnected()
 {
-	// Only the sensors whose value genuinely comes from the ERV over the bus -
-	// indoor_temperature/indoor_humidity are NOT affected: we publish those
-	// ourselves from setCurrentTemperature()/setCurrentHumidity(), their source
-	// is an external HA sensor, not the ERV - they stay valid even if the bus
-	// to the ERV is down.
 #ifdef USE_SENSOR
 	if( power_sensor_ ) power_sensor_->publish_state(NAN);
 	if( temperature_sensor_ ) temperature_sensor_->publish_state(NAN);
@@ -964,10 +879,6 @@ void BroanComponent::publishBusDisconnected()
 	if( override_remaining_sensor_ ) override_remaining_sensor_->publish_state(NAN);
 #endif
 
-	// ventilation_state has no NAN equivalent (TextSensor::set_has_state(false) alone
-	// wouldn't notify HA in real time - a genuine publish_state() call is needed).
-	// "unknown" acts as a sentinel value: not HA's native "unavailable" badge,
-	// but an explicit state indicating the data is no longer fresh.
 #ifdef USE_TEXT_SENSOR
 	if( ventilation_state_text_sensor_ ) ventilation_state_text_sensor_->publish_state("unknown");
 #endif

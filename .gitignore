@@ -1,1 +1,4 @@
 *.pyc
+.DS_Store
+local/secrets.yaml
+local/*.bak*

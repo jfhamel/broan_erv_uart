@@ -40,7 +40,7 @@ void BroanComponent::setFanMode( std::string mode )
 	else if( mode == "recirculation_med" )
 		value = BroanFanMode::RecirculateMed;
 	else if( mode == "recirculation_max" )
-		value = BroanFanMode::Recirculate;
+		value = BroanFanMode::RecirculateMax;
 	else if( mode == "absence" )
 		value = BroanFanMode::Away;
 	else
