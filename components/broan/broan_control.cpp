@@ -7,17 +7,11 @@ void BroanComponent::setFanMode( std::string mode )
 {
 	uint8_t value = 0x01;
 
-	// Top-level modes exposed to Home Assistant. "off"/"smart"/"intermittent"/"absence"
-	// are simple, single-register writes. Turbo is deliberately NOT selectable here: the
-	// real wall controller always writes TurboDuration + FanMode together in one frame
-	// (see setTurboDuration()), and we've never captured a plain "turbo, no duration"
-	// write, so we don't emulate one.
-	//
-	// Exchange and recirculation both expose their min/med/max steps directly rather
-	// than a single mode + a speed number: confirmed by capture that ExchangeMin/Max
-	// (0x09/0x0A) don't accept an adjustable speed at all (same as recirculation), only
-	// ExchangeMedManual (0x0B) does - and even then, only when "exchange_adjustable" was
-	// explicitly picked (see m_bAdjustableSpeed below), not for the plain "exchange_med".
+	// Basic selectable modes to mimic the wall controller options for HA.
+	// Turbo and humiditstat are modes that apply over these modes with switched in HA.
+	// Override is settable by the physical swicth, no interface here.
+	// exchange_adjustable does not exist on the wall controller but
+	// left avilable in HA as an interesting feature.
 	bool bAdjustable = false;
 
 	if( mode == "smart" )
@@ -57,10 +51,7 @@ void BroanComponent::setFanMode( std::string mode )
 
 	writeRegisters( vecFields );
 
-	// "exchange_adjustable" applies the speed already shown in HA right away, rather
-	// than leaving the ERV on a possibly stale target from a previous session.
-	// m_bAdjustableSpeed is already up to date above (synchronous), so setFanSpeed()'s
-	// guard lets this call through normally.
+	// If exchange_adjustable is selected, fan speed is adjusted.
 #ifdef USE_NUMBER
 	if( bAdjustable && fan_speed_number_ )
 		setFanSpeed( fan_speed_number_->state );
@@ -69,10 +60,6 @@ void BroanComponent::setFanMode( std::string mode )
 
 void BroanComponent::setFanSpeed( float input )
 {
-	// Only applies when "exchange_adjustable" was explicitly selected (see setFanMode()).
-	// ExchangeMin/Max and the plain "exchange_med" all confirmed by capture to ignore a
-	// custom CFM target - same as recirculation, which never had adjustable speed either
-	// and is now exposed as three direct steps instead of a number.
 	if( !m_bAdjustableSpeed )
 	{
 		ESP_LOGW("broan","setFanSpeed() only applies when 'exchange_adjustable' is selected");
@@ -106,7 +93,6 @@ void BroanComponent::setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, 
 {
 	std::vector<BroanField_t> vecFields;
 
-	ESP_LOGI("broan_control", "Set fan speed CFM limit: mode %02X, direction %02X, %.1f CFM", mode, direction, flTargetCFM);
 
 	switch( mode )
 	{
@@ -212,19 +198,12 @@ void BroanComponent::setHumiditySetpoint( float humidity ) {
 }
 
 void BroanComponent::setCurrentHumidity( float humidity ) {
-	// Remembered regardless of mode, so the freshest HA-sourced value is ready
-	// to restore the moment we're back in command mode (see setListenOnly()).
+	
+	// Remember last humidity to republish every 20.3 secondes.
 	m_flLastHumidity = humidity;
 	m_bHaveHumidity = true;
 
-	// While listening in on a real wall controller, it's the source of truth
-	// right now - writing our own HA source sensor's value here (to the wire
-	// or even just the local indoor_humidity display) would fight with what
-	// it's actually broadcasting. Confirmed by capture: without this guard,
-	// indoor_humidity visibly spikes to our value the instant the HA sensor
-	// changes, then gets corrected back down moments later once the wall
-	// controller's own broadcast is overheard again (see the
-	// ControllerHumidity case in parseBroanFields()).
+	// When listenOnly, wall controller already sends humidity to ERV. Nothing else to do.
 	if( m_bListenOnly )
 		return;
 
@@ -237,11 +216,9 @@ void BroanComponent::setCurrentHumidity( float humidity ) {
 
 	writeRegisters( vecFields );
 
-	// Pushes the next automatic re-broadcast back out, since we just did one now.
+	// Remember last humidity update time.
 	m_unLastEnvironmentBroadcast = millis();
 
-	// We already have the value in hand - no need to wait for a read-back that will
-	// never come (this register is write-only on the wire).
 #ifdef USE_SENSOR
 	if( indoor_humidity_sensor_ )
 		indoor_humidity_sensor_->publish_state( humidity );
@@ -249,10 +226,12 @@ void BroanComponent::setCurrentHumidity( float humidity ) {
 }
 
 void BroanComponent::setCurrentTemperature( float temperature ) {
+
+	// Remember last temperature to republish every 20.3 secondes.
 	m_flLastTemperature = temperature;
 	m_bHaveTemperature = true;
 
-	// Same reasoning as setCurrentHumidity() above.
+	// When listenOnly, wall controller already sends temperature to ERV. Nothing else to do.
 	if( m_bListenOnly )
 		return;
 
@@ -265,6 +244,7 @@ void BroanComponent::setCurrentTemperature( float temperature ) {
 
 	writeRegisters( vecFields );
 
+	// Remember last temprature update time.
 	m_unLastEnvironmentBroadcast = millis();
 
 #ifdef USE_SENSOR
@@ -289,7 +269,6 @@ void BroanComponent::setTurboDuration( uint32_t seconds ) {
 
 	ESP_LOGI("broan_control", "Set turbo duration: %u s", seconds);
 
-	// Matches the exact wire format captured from the wall controller for 1h/2h/4h:
 	// a single write frame containing TurboDuration followed by FanMode=Turbo.
 	vecFields.push_back( m_vecFields[TurboDuration].copyForUpdate( seconds ) );
 	vecFields.push_back( m_vecFields[FanMode].copyForUpdate( (uint8_t)BroanFanMode::Turbo ) );

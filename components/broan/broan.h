@@ -48,10 +48,13 @@ namespace broan {
 
 //#define SCAN_UNKNOWN 1
 
-// LISTEN_ONLY is no longer a compile-time flag - see setListenOnly() and
-// m_bListenOnly instead, callable directly from YAML (switch/select template,
-// a lambda, etc) to toggle this at runtime from HA without needing a dedicated
-// C++ entity class in this component.
+// LISTEN_ONLY is not a #define anymore. It is rather set to true or false.
+// using setListenOnly(), available in HA.
+// If m_bListenOnly = true, the wall controller must be powered so that
+// the ESP32 can listen the traffic on the bus.
+// If m_bListenOnly = false, the wall controller must be disconnected (off)
+// so that ESP32 is the only controller.
+// On/off of wall controller can easily be controlled with a GPIO/relay on the board.
 
 template<typename T>
 concept BroanFieldTypes = 	std::is_same_v<T, float> ||
@@ -330,26 +333,14 @@ private:
 
 	uint32_t m_nLastHadControl = 0;
 	uint32_t m_unLastHeartbeat = 0; // Next time to send heartbeat
-	uint32_t m_unLastEnvironmentBroadcast = 0; // Next time to re-send humidity/temperature
-	uint32_t m_unLastValidResponse = 0; // Last time a genuine response was received from the ERV (opcode 21/41)
-	bool m_bBusTimedOut = false; // Already published NAN due to lack of response - avoids repeating it every loop iteration
-
-	// Runtime equivalent of the old LISTEN_ONLY compile-time flag. When true: process
-	// every message seen on the bus regardless of its target (not just ones addressed
-	// to us) and never transmit anything ourselves - lets the ESP32 passively observe
-	// traffic between a real physical wall controller and the ERV without interfering.
-	// Meant to be paired with a relay cutting power to the physical wall controller,
-	// so the two are never both active on the bus at the same time.
-	bool m_bListenOnly = false;
-
-	// Last values supplied via setCurrentHumidity()/setCurrentTemperature(),
-	// re-broadcast periodically (see runTasks()) even if unchanged, to reproduce
-	// the wall controller's cadence (~20.3s) rather than relying only on
-	// point-in-time updates from an external HA sensor.
-	float m_flLastHumidity = 0.f;
-	float m_flLastTemperature = 0.f;
-	bool m_bHaveHumidity = false;
-	bool m_bHaveTemperature = false;
+	uint32_t m_unLastEnvironmentBroadcast = 0; // Next time to send humidity/temperature
+	uint32_t m_unLastValidResponse = 0; // Last time a genuine response was received from the ERV
+	bool m_bBusTimedOut = false; // Flag to memorize that bus timeout has occured,avoid multiple resend of NAN
+	bool m_bListenOnly = false; // Flag of listenOnly mode
+	float m_flLastHumidity = 0.f; // Last humidity value to be published every 20.3 sec if no change.
+	float m_flLastTemperature = 0.f; // Last temperature value to be published every 20.3 sec if no change.
+	bool m_bHaveHumidity = false; // Set to true when humidity is set, stays false otherwise.
+	bool m_bHaveTemperature = false; // Set to true when temperature is set, stays false otherwise.
 
 	bool m_bERVReady = false;
 
