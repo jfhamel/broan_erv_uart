@@ -23,7 +23,7 @@ CONFIG_SCHEMA = cv.Schema(
         # Absence/Deshumidistat/Ovr) ends - never itself holds an override value,
         # only "normal" modes (off/smart/intermittent/exchange*/recirculation*).
         # Read-only, purely informational - see commanded_fan_mode (00:20) to
-        # control it, and cancelOverride()/the turbo switch for how this is used
+        # control it, and setTurbo()/the turbo switch for how this is used
         # internally to know what to revert to.
         cv.Optional(CONF_BASE_FAN_MODE): text_sensor.text_sensor_schema(
             icon=ICON_FAN,

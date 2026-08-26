@@ -110,7 +110,7 @@ async def to_code(config):
 
     if turbo_duration_config := config.get(CONF_TURBO_DURATION):
         # Minutes, 0-4h in 15 minute steps. 0 means "not set" - starting Turbo with
-        # this at 0 is refused (see BroanComponent::startTurbo()).
+        # this at 0 is refused (see BroanComponent::setTurbo()).
         t = await number.new_number(
             turbo_duration_config, min_value=0, max_value=240, step=15
         )

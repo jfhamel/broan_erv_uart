@@ -325,9 +325,8 @@ public:
 	void setCurrentTemperature( float temperature );
 	void setIntermittentPeriod( uint32_t period );
 	void setTurboDuration( uint32_t seconds );
-	void cancelOverride();
+	void setTurbo( bool enable );
 	void setListenOnly( bool enable );
-	void startTurbo();
 
 private:
 

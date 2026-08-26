@@ -5,10 +5,7 @@ namespace broan {
 
 void TurboSwitch::write_state(bool state) {
 	this->publish_state(state);
-	if( state )
-		this->parent_->startTurbo();
-	else
-		this->parent_->cancelOverride();
+	this->parent_->setTurbo(state);
 }
 
 }  // namespace broan

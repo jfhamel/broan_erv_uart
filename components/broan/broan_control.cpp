@@ -269,7 +269,7 @@ void BroanComponent::setTurboDuration( uint32_t seconds ) {
 
 	ESP_LOGI("broan_control", "Set turbo duration: %u s", seconds);
 
-	// a single write frame containing TurboDuration followed by FanMode=Turbo.
+	// A single write frame containing TurboDuration followed by FanMode=Turbo.
 	vecFields.push_back( m_vecFields[TurboDuration].copyForUpdate( seconds ) );
 	vecFields.push_back( m_vecFields[FanMode].copyForUpdate( (uint8_t)BroanFanMode::Turbo ) );
 
@@ -279,50 +279,42 @@ void BroanComponent::setTurboDuration( uint32_t seconds ) {
 	writeRegisters( vecFields );
 }
 
-void BroanComponent::cancelOverride()
+void BroanComponent::setTurbo( bool enable )
 {
-	// Reads back whatever base mode (02:20) the ERV is actually running right now
-	// and writes it straight to FanMode (00:20) - exits Turbo/Absence/Humidity/Ovr
-	// unconditionally, regardless of what fan_mode's displayed state currently
-	// shows in HA. A select only fires when its displayed value changes; a button
-	// always fires on every press, so this is the reliable way to back out of an
-	// override when the dropdown is showing something stale.
-	uint8_t baseMode = m_vecFields[BaseMode].m_value.m_chValue;
-
-	ESP_LOGI("broan_control", "Cancel override: returning to base mode %02X", baseMode);
-
-	std::vector<BroanField_t> vecFields;
-	vecFields.push_back( m_vecFields[FanMode].copyForUpdate( baseMode ) );
-	m_vecFields[FanMode].markDirty();
-	writeRegisters( vecFields );
-}
-
-void BroanComponent::startTurbo()
-{
-	// Reads the desired duration directly from the turbo_duration number (minutes)
-	// - no separate "pending duration" state needed, its ->state IS the value to use.
-	float flMinutes = 60.f; // fallback if the number isn't configured in YAML
+	if( enable )
+	{
+		float flMinutes = 60.f; // fallback duration if the number is not configured in YAML
 
 #ifdef USE_NUMBER
-	if( turbo_duration_number_ )
-		flMinutes = turbo_duration_number_->state;
+		if( turbo_duration_number_ )
+			flMinutes = turbo_duration_number_->state;
 #endif
 
-	if( flMinutes <= 0.f )
-	{
-		ESP_LOGW("broan_control", "Cannot start turbo: duration is 0 minutes. Set turbo_duration first.");
+		if( flMinutes <= 0.f )
+		{
+			ESP_LOGW("broan_control", "Cannot start turbo: duration is 0 minutes. Set turbo_duration first.");
 #ifdef USE_SWITCH
-		// Flip the switch back off since we're not actually starting anything -
-		// otherwise it would show "on" for a turbo that never started.
-		if( turbo_switch_ )
-			turbo_switch_->publish_state( false );
+			// Switch off if duration = 0
+			if( turbo_switch_ )
+				turbo_switch_->publish_state( false );
 #endif
-		return;
+			return;
+		}
+		setTurboDuration( (uint32_t)( flMinutes * 60.f ) );
 	}
+	else
+	{
+		// Reads back base mode in 02:20
+		// and writes it in fan mode on 00:20
+		uint8_t baseMode = m_vecFields[BaseMode].m_value.m_chValue;
 
-	// setTurboDuration() already logs the resulting action - no separate log here
-	// to avoid a duplicate message right above it.
-	setTurboDuration( (uint32_t)( flMinutes * 60.f ) );
+		ESP_LOGI("broan_control", "Cancel override: returning to base mode %02X", baseMode);
+
+		std::vector<BroanField_t> vecFields;
+		vecFields.push_back( m_vecFields[FanMode].copyForUpdate( baseMode ) );
+		m_vecFields[FanMode].markDirty();
+		writeRegisters( vecFields );
+	}
 }
 
 void BroanComponent::setListenOnly( bool enable )
@@ -330,12 +322,8 @@ void BroanComponent::setListenOnly( bool enable )
 	ESP_LOGI("broan_control", "Set listen only: %s", enable ? "ON" : "OFF");
 	m_bListenOnly = enable;
 
-	// Confirmed by capture (2026-08-14): the physical wall controller's own
-	// polling cycle never requests CFM/RPM at all (03:10/04:10/05:10/06:10) -
-	// a completely different, much larger set of registers is used for whatever
-	// its own display shows instead. While listening in on it, we'll never see
-	// these updated, so mark them unavailable right away rather than leaving
-	// stale values displayed indefinitely.
+	// In listenOnly mode, fan speeds are not published by the ERV
+	// so we show unavialable.
 #ifdef USE_SENSOR
 	if( enable )
 	{
@@ -346,19 +334,8 @@ void BroanComponent::setListenOnly( bool enable )
 	}
 	else
 	{
-		// Returning to ESP32 control: the ERV may still be holding whatever value
-		// the wall controller last wrote to it (04:50/05:50), and indoor_temperature/
-		// indoor_humidity in HA may still be showing it too - reclaim both right
-		// away with the last genuine value we got from HA, rather than waiting for
-		// the HA source sensor to happen to change again or for the next periodic
-		// broadcast (up to ENVIRONMENT_BROADCAST_RATE later). Calls the full
-		// setCurrentHumidity()/setCurrentTemperature() (not just publish_state())
-		// so this actually writes fresh values to the ERV too, not just the local
-		// HA-facing display - matters for Smart mode, which uses these internally.
-		// m_flLastHumidity/m_flLastTemperature only ever reflect real HA-sourced
-		// values, never the overheard wall controller ones - see the
-		// ControllerHumidity/ControllerTemperature cases in parseBroanFields(),
-		// which publish directly without touching these.
+		// When returning control to ERV, immediately update humidity and temperature
+		// with HA sensor values rather than wait 20.3 seconds.
 		if( m_bHaveHumidity )
 			setCurrentHumidity( m_flLastHumidity );
 		if( m_bHaveTemperature )
