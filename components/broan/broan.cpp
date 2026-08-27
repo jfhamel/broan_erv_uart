@@ -288,7 +288,7 @@ void BroanComponent::handleMessage(uint8_t srcAddress, uint8_t dstAddress, const
 void BroanComponent::replyIfAllowed()
 {
 	uint32_t time = millis();
-	if( m_nLastHadControl + CONTROL_TIMEOUT < time )
+	if( !m_bListenOnly && m_nLastHadControl + CONTROL_TIMEOUT < time )
 	{
 		ESP_LOGW("broan","ERV has not yielded control in over %ims, communication has likely failed. Please restart the device.", CONTROL_TIMEOUT);
 		m_bERVReady = false;

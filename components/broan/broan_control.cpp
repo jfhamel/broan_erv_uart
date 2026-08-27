@@ -322,6 +322,9 @@ void BroanComponent::setListenOnly( bool enable )
 	ESP_LOGI("broan_control", "Set listen only: %s", enable ? "ON" : "OFF");
 	m_bListenOnly = enable;
 
+	if( !enable )
+		m_nLastHadControl = millis(); // Reset this variable when ESP32 takes control.
+
 #ifdef USE_SENSOR
 	// In listenOnly mode, fan speeds are not published by the ERV
 	// so we show unavialable.
