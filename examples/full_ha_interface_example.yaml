@@ -1,113 +1,325 @@
+# Full example based on a real running configuration, covering every entity the
+# component currently exposes, plus the wall-controller/Home-Assistant control
+# source switch and the relay wiring for a Waveshare ESP32-S3-Relay-6ch board.
+# For general Waveshare board configuration: https://community.home-assistant.io/t/waveshare-esp32-6ch-relay-board-config-yaml/1007965
+
+esp32:
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: ERV Fallback Hotspot
+    password: !secret ap_password
+
+captive_portal:
+
 external_components:
   - source:
       type: git
-      url: https://github.com/nspitko/broan_erv_uart # remplace par ton fork si applicable
+      url: https://github.com/your_repositoty
       ref: main
     components: [ broan ]
 
 uart:
   id: rs485
-  tx_pin: GPIO17
+  tx_pin: GPIO17 # Change these to match your rs485 tranceiver. 17/18 is txd1/rxd1
   rx_pin: GPIO18
   baud_rate: 38400
   rx_buffer_size: 2048
+
+  # debug:
+  #  direction: BOTH
+  #  dummy_receiver: false
+  #  sequence:
+  #    - lambda: UARTDebug::log_hex(direction, bytes, ' ');
 
 broan:
   uart_id: rs485
   id: mybroan
 
-select:
-  - platform: broan
-    fan_mode:
-      name: "Mode de ventilation" # off / smart / intermittent / exchange_min|med|max / exchange_adjustable / recirculation_min|med|max / absence
+esphome:
+  name: erv
+  friendly_name: ERV
+  # Defaults to the physical wall controller being in charge at boot - flip
+  # control_source to "Home Assistant" below once you're ready to take over.
+  on_boot:
+    priority: 600
+    then:
+      - select.set:
+          id: control_source
+          option: "Wall Controller"
 
-switch:
+select:
+  # Switches between letting the physical wall controller run the bus (this
+  # component only listens, see setListenOnly()) and ESP32/Home Assistant
+  # taking over as the active controller. Pair with a relay cutting power to
+  # the physical wall controller so the two are never both active at once.
+  - platform: template
+    name: "ERV Control Source"
+    id: control_source
+    initial_option: "Wall Controller"
+    optimistic: true
+    options:
+      - "Home Assistant"
+      - "Wall Controller"
+    set_action:
+      then:
+        - lambda: |-
+            id(mybroan).setListenOnly(x == "Wall Controller");
+        - if:
+            condition:
+              lambda: 'return x == "Wall Controller";'
+            then:
+              - switch.turn_off: relay1
+            else:
+              - switch.turn_on: relay1
+
   - platform: broan
-    turbo:
-      name: "Turbo"               # ON démarre (durée = turbo_duration), OFF annule
-    humidity_control:
-      name: "Contrôle d'humidité"
-      id: humcontrol
-      on_turn_on:
-        then:
-          lambda: id(mybroan).setCurrentHumidity(id(myhumidity).state);
-    listen_only:
-      name: "Écoute seulement"     # ON: observe le bus sans jamais rien transmettre
-                                    # (à combiner avec un relais coupant le 12V du
-                                    # contrôleur mural physique)
+    commanded_fan_mode:
+      name: "Fan Mode" # off / smart / intermittent / exchange_min|med|max / exchange_adjustable / recirculation_min|med|max / absence
 
 number:
   - platform: broan
-    fan_speed:
-      name: "Vitesse (échange ajustable)" # 0-100%, s'applique uniquement si fan_mode=exchange_adjustable
-    turbo_duration:
-      name: "Durée du Turbo"       # 0-240 min, pas de 15 (0-4h). 0 = ne démarre pas.
-    intermittent_period:
-      name: "Période Intermittent" # 10-50 min, pas de 5
-    humidity_setpoint:
-      name: "Seuil d'humidité cible"
 
-text_sensor:
-  - platform: broan
-    current_mode:
-      name: "Ventilation en cours" # off / exchange / recirculation / deshumidistat / turbo / override
+    # Speed as a ratio of min vs max speed. Eg, if your MIN is 20 CFM and your MAX is
+    # 40 CFM, 50% means medium rill be at 30 CFM. Only applies when fan_mode=exchange_adjustable.
+    fan_speed:
+      name: "Exchange Speed"
+
+    # How many minutes in CONT per hour in intermittent mode
+    intermittent_period:
+      name: "Intermittent Period"
+
+    humidity_setpoint:
+      name: "Humidity Setpoint"
+
+    turbo_duration:
+      name: "Turbo Duration" # 0-240 min, step of 15 (0-4h). 0 = won't start.
+
+    filter_life_reset_duration:
+      name: "Filter Life Reset Duration (months)"
 
 sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal (dB)"
+    update_interval: 60s
+
   - platform: broan
     power:
-      name: "Puissance"
-    temperature:
-      name: "Température (admission ERV)"
-    temperature_out:
-      name: "Température (évacuation ERV)"
-    filter_life:
-      name: "Durée de vie restante du filtre"
-    supply_fan_cfm:
-      name: "Débit soufflage (CFM)"
-    exhaust_fan_cfm:
-      name: "Débit extraction (CFM)"
-    supply_fan_rpm:
-      name: "Vitesse moteur soufflage (RPM)"
-    exhaust_fan_rpm:
-      name: "Vitesse moteur extraction (RPM)"
-    turbo_remaining:
-      name: "Temps restant (Turbo)"
-    override_remaining:
-      name: "Temps restant (Ovr salle de bain)"
-    indoor_temperature:
-      name: "Température intérieure"
-    indoor_humidity:
-      name: "Humidité intérieure"
+      name: "Power Draw"
 
-  # Source: instrument séparé fournissant l'humidité intérieure - un capteur HA (comme
-  # ici) ou une sonde câblée directement à l'ESP32. Obligatoire dès que l'ESP32 est le
-  # seul contrôleur sur le bus RS-485 : il n'y a alors plus de contrôleur mural physique
-  # pour fournir cette valeur à l'ERV.
+    temperature:
+      name: "Outdoor Temperature"
+
+    filter_life:
+      name: "Remaining Filter Life"
+
+    supply_fan_cfm:
+      name: "Supply Fan CFM"
+
+    exhaust_fan_cfm:
+      name: "Exhaust Fan CFM"
+
+    supply_fan_rpm:
+      name: "Supply Fan RPM"
+
+    exhaust_fan_rpm:
+      name: "Exhaust Fan RPM"
+
+    indoor_temperature:
+      name: "Indoor Temperature"
+
+    indoor_humidity:
+      name: "Indoor Humidity"
+
+    override_remaining:
+      name: "Bathroom Boost Remaining"
+
+    turbo_remaining:
+      name: "Turbo Remaining"
+
+  # Source: a separate instrument supplying indoor humidity - a Home Assistant
+  # sensor (as here) or a probe wired directly to the ESP32. Required once the
+  # ESP32 is the sole controller on the RS-485 bus: there's no physical wall
+  # controller left to supply this value to the ERV.
   - platform: homeassistant
     id: myhumidity
     name: "Home Assistant Humidity"
     internal: true
-    entity_id: sensor.third_reality_1_humidite
+    entity_id: sensor.your_humidity_sensor
     on_value:
       then:
-        lambda: |-
-          if (id(humcontrol).state) {
-            id(mybroan).setCurrentHumidity(id(myhumidity).state);
-          }
+        lambda: id(mybroan).setCurrentHumidity(id(myhumidity).state);
 
-  # Source: même principe pour la température intérieure - remplace par n'importe quel
-  # capteur HA existant, ou une lambda lisant directement un capteur câblé à l'ESP32.
-  # setCurrentTemperature() republie automatiquement vers indoor_temperature ci-dessus.
+  # Source: same principle for indoor temperature - replace with any existing
+  # HA sensor, or a lambda reading a sensor wired directly to the ESP32.
+  # setCurrentTemperature() automatically republishes to indoor_temperature above.
   - platform: homeassistant
     id: mytemperature
     name: "Home Assistant Temperature"
     internal: true
-    entity_id: sensor.third_reality_1_temperature
+    entity_id: sensor.your_temperature_sensor
     on_value:
       then:
         lambda: id(mybroan).setCurrentTemperature(id(mytemperature).state);
 
 button:
+  - platform: restart
+    name: "Restart"
+    id: restart_button
+
+  - platform: factory_reset
+    name: "Factory Reset"
+    id: reset
+    internal: true
+
+  - platform: safe_mode
+    name: "Safe Mode"
+    internal: true
+
   - platform: broan
-    filter_reset:
-      name: "Réinitialiser le filtre"
+    filter_life_reset:
+      name: "Reset Filter Life"
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
+binary_sensor:
+  - platform: status
+    name: "Status"
+
+  # Boot button on the Waveshare board, wired to restart the device on press.
+  - platform: gpio
+    name: "Boot Button"
+    pin:
+      number: 0
+      ignore_strapping_warning: true
+      mode:
+        input: true
+      inverted: true
+    disabled_by_default: true
+    on_press:
+      then:
+        - button.press: restart_button
+
+text_sensor:
+  - platform: version
+    name: "Firmware Version"
+
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      entity_category: diagnostic
+    ssid:
+      name: "SSID"
+      entity_category: diagnostic
+    mac_address:
+      name: "MAC Address"
+      entity_category: diagnostic
+
+  - platform: broan
+    base_fan_mode:
+      name: "Base Fan Mode"
+    ventilation_state:
+      name: "Current Ventilation"
+
+switch:
+  - platform: broan
+    humidity_control:
+      name: "Humidity Control"
+      id: humcontrol
+      on_turn_on:
+        then:
+          lambda: id(mybroan).setCurrentHumidity(id(myhumidity).state);
+    turbo:
+      name: "Turbo"
+
+  # Relays on the Waveshare ESP32-S3-Relay-6ch board. Relay 1 here cuts power
+  # to the physical wall controller when Home Assistant takes over (see
+  # control_source above) - relays 2-6 are just exposed as spares.
+  - platform: gpio
+    pin: GPIO1
+    id: relay1
+    name: Relay 1
+    internal: true
+
+  - platform: gpio
+    pin: GPIO2
+    id: relay2
+    name: Relay 2
+    internal: true
+
+  - platform: gpio
+    pin: GPIO41
+    id: relay3
+    name: Relay 3
+    internal: true
+
+  - platform: gpio
+    pin: GPIO42
+    id: relay4
+    name: Relay 4
+    internal: true
+
+  - platform: gpio
+    pin:
+      number: GPIO45
+      ignore_strapping_warning: true
+    id: relay5
+    name: Relay 5
+    internal: true
+
+  - platform: gpio
+    pin:
+      number: GPIO46
+      ignore_strapping_warning: true
+    id: relay6
+    internal: true
+    name: Relay 6
+
+  - platform: template
+    name: Buzzer
+    icon: mdi:volume-high
+    turn_on_action:
+      - rtttl.play:
+          id: rtttl_buzzer
+          rtttl: 'beep:d=4,o=5,b=100:16e6'
+    turn_off_action:
+      - rtttl.stop:
+          id: rtttl_buzzer
+    internal: true
+
+output:
+  - platform: ledc
+    pin: GPIO21
+    id: buzzer_output
+
+rtttl:
+  output: buzzer_output
+  id: rtttl_buzzer
+  gain: 40%
+
+light:
+  - platform: esp32_rmt_led_strip
+    chipset: ws2812
+    pin: GPIO38
+    num_leds: 1
+    rgb_order: RGB
+    name: "RGB LED"
+    id: rgb_led
+    internal: true
