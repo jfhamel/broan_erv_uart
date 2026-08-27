@@ -14,9 +14,7 @@ CONF_FILTER_LIFE_RESET = "filter_life_reset"
 
 CONFIG_SCHEMA = {
     cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
-    # Applies whatever duration is currently set on filter_life_reset_duration
-    # (months) - see BroanComponent::applyFilterLifeReset().
-    cv.Optional(CONF_FILTER_LIFE_RESET): button.button_schema(
+	cv.Optional(CONF_FILTER_LIFE_RESET): button.button_schema(
         FilterLifeResetButton,
         entity_category=ENTITY_CATEGORY_CONFIG,
         icon=ICON_AIR_FILTER,

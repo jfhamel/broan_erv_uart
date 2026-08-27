@@ -15,8 +15,7 @@ void BroanComponent::setup()
 	for( int i=0; i<BroanField::MAX_FIELDS; i++ )
 		m_vecFields[i].markDirty();
 
-	// Avoids a false bus-timeout trigger on the very first boot, before we've
-	// even had a chance to exchange anything with the ERV.
+	// Artificially sets m_unLastValidResponse to avoid false timeout if m_unLastValidResponse=0 if never set.
 	m_unLastValidResponse = millis();
 
   	if(flow_control_pin_)
@@ -199,7 +198,7 @@ void BroanComponent::handleMessage(uint8_t srcAddress, uint8_t dstAddress, const
 		case 0x02:
 		{
 			// Respond to ping
-			// In listenOnly, ping is not adressed to us, so do nothing and return.
+			// In listenOnly, ping is not adressed to ESP32, so do nothing and return.
 			if( m_bListenOnly )
 				break;
 
@@ -215,7 +214,7 @@ void BroanComponent::handleMessage(uint8_t srcAddress, uint8_t dstAddress, const
 		case 0x04:
 		{
 			// Flow control
-			// In listenOnly, ESP32 does not need to control the flow.
+			// In listenOnly, ESP32 does not need to control the flow, so return.
 			if( m_bListenOnly )
 				break;
 
@@ -271,7 +270,7 @@ void BroanComponent::handleMessage(uint8_t srcAddress, uint8_t dstAddress, const
 		}
 		case 0x40:
 			// Write request from the wall controller must be decoded in listenOnly mode
-			// especially top get the indoor temperature and humidity
+			// especially to get the indoor temperature and humidity
 			parseBroanFields(message);
 			break;
 		case 0x20:
@@ -359,12 +358,12 @@ std::string BroanComponent::ventilationStateToString( uint8_t ventilationState )
 	switch( ventilationState )
 	{
 		case 0x00: return "off";
-		case 0x01:
+		case 0x01: // 0x01 and 0x04 are both exchange, do not know why there are two values for one mode.
 		case 0x04: return "exchange";
 		case 0x02: return "deshumidistat";
 		case 0x03: return "turbo";
 		case 0x05: return "override";
-		case 0x06:
+		case 0x06: // 0x06, 0x07, 0x08 all return reciculate whatever is the speed.
 		case 0x07:
 		case 0x08: return "recirculation";
 		default: return "unknown";
@@ -404,7 +403,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 			continue;
 		// Reset m_bAdjustableSpeed to false if ERV switches to a different mode
 		// as it does not apply.
-		// Intentionally kept apart from the switch case FanMode below to as this is not related to value publishing.
+		// Intentionally kept apart from the switch case FanMode below as this is not related to value publishing.
 		if( unField == BroanField::FanMode )
 		{
 			uint8_t val = pField->m_value.m_chValue;
@@ -494,7 +493,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !temperature_sensor_ )
 					continue;
 				
-				// Outdoor temperature is meaningless in recerculation.
+				// Outdoor temperature is meaningless in recirculation.
 				if( m_vecFields[VentilationState].m_value.m_chValue == BroanFanMode::RecirculateMax )
 					temperature_sensor_->publish_state(NAN);
 				else

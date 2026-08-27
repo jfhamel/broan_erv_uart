@@ -13,24 +13,14 @@ CONF_BASE_FAN_MODE = "base_fan_mode"
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
-        # What the ERV is physically doing right now: "off", "exchange",
-        # "recirculation", "deshumidistat", "turbo" or "override". Based on 07:20
-        # (VentilationState) - see broan-erv-protocole.md for the full table.
         cv.Optional(CONF_VENTILATION_STATE): text_sensor.text_sensor_schema(
             icon=ICON_FAN,
         ),
-        # The base mode (02:20) the ERV falls back to once an override (Turbo/
-        # Absence/Deshumidistat/Ovr) ends - never itself holds an override value,
-        # only "normal" modes (off/smart/intermittent/exchange*/recirculation*).
-        # Read-only, purely informational - see commanded_fan_mode (00:20) to
-        # control it, and setTurbo()/the turbo switch for how this is used
-        # internally to know what to revert to.
-        cv.Optional(CONF_BASE_FAN_MODE): text_sensor.text_sensor_schema(
+		cv.Optional(CONF_BASE_FAN_MODE): text_sensor.text_sensor_schema(
             icon=ICON_FAN,
         ),
     }
 )
-
 
 async def to_code(config):
     broan_component = await cg.get_variable(config[CONF_BROAN_ID])

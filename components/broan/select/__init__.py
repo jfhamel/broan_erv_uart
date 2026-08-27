@@ -15,10 +15,7 @@ CONF_COMMANDED_FAN_MODE = 'commanded_fan_mode'
 CONFIG_SCHEMA = {
     cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
 
-    # What's commanded (00:20) - not necessarily what the ERV is doing right now
-    # underneath an override. See text_sensor base_fan_mode (02:20) and
-    # ventilation_state (07:20) for that.
-    cv.Optional(CONF_COMMANDED_FAN_MODE): select.select_schema(
+	cv.Optional(CONF_COMMANDED_FAN_MODE): select.select_schema(
         CommandedFanModeSelect,
         entity_category=ENTITY_CATEGORY_CONFIG,
         icon=ICON_GAUGE,

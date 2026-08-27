@@ -43,18 +43,11 @@ namespace broan {
 #define MAX_REQUEST_SIZE 10
 #define INVALID_FIELD 0xFFFFFF
 
-// ***** À revalider
-// #define FILTER_LIFE_MAX 7884000  not used anymore. See setFilterLife
+// FILTER_LIFE_MAX 7884000 is not used anymore as it is settable in HA. See setFilterLife()
 
 //#define SCAN_UNKNOWN 1
 
-// LISTEN_ONLY is not a #define anymore. It is rather set to true or false.
-// using setListenOnly(), available in HA.
-// If m_bListenOnly = true, the wall controller must be powered so that
-// the ESP32 can listen the traffic on the bus.
-// If m_bListenOnly = false, the wall controller must be disconnected (off)
-// so that ESP32 is the only controller.
-// On/off of wall controller can easily be controlled with a GPIO/relay on the board.
+// LISTEN_ONLY is not used anymore. It is now settable at run time. See setListenOnly()
 
 template<typename T>
 concept BroanFieldTypes = 	std::is_same_v<T, float> ||
@@ -129,18 +122,13 @@ enum BroanField
 
 	// Input
 	Heartbeat, // Weird void value that controllers ping every 10s
-	ControllerHumidity,    // Write-only. Current indoor humidity (%), fed by HA.
-	ControllerTemperature, // Write-only. Current indoor temperature (C) fed by HA
+	ControllerHumidity,
+	ControllerTemperature,
 
 	// Maintenance
-//**** à revoir - Est-ce que FilterLife est vraiment utile
 	FilterReset, // Set to 1 to reset
-	FilterLife, // default 7884000 / 3 months. Seconds.
-	FilterLifeStage, // 09:30. Confirmed by capture (2026-08-19): the wall controller
-	                 // writes the desired seconds value here FIRST, before FilterReset
-	                 // - appears to "stage" the value FilterReset then applies to
-	                 // FilterLife, rather than FilterReset alone accepting an arbitrary
-	                 // FilterLife value directly.
+	FilterLife, // New filter life.
+	FilterLifeStage, // 09:30, used in the filter life reset process. 
 
 	// Unknown fields that look interesting but aren't understood nor read by controllers
 	UnknownA,
@@ -318,7 +306,7 @@ public:
 	void setFanSpeed( float speed );
 	void setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, float flTargetCFM );
 	void setFilterLife( uint32_t days );
-	void applyFilterLifeReset(); // Reads filter_life_reset_duration_number_->state (months) and calls setFilterLife() - public bridge, since that pointer itself is protected (see SUB_NUMBER)
+	void applyFilterLifeReset();
 	void setHumidityControl( bool enable );
 	void setHumiditySetpoint( float humidity );
 	void setCurrentHumidity( float humidity );

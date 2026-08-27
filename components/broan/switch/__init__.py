@@ -23,10 +23,6 @@ CONFIG_SCHEMA = {
         entity_category=ENTITY_CATEGORY_CONFIG,
         icon=ICON_WATER,
     ),
-    # Turning this on starts Turbo using whatever duration is currently set on the
-    # turbo_duration number. Turns itself back off once Turbo ends (timer expiry or
-    # any other mode change) - it reflects real device state, it isn't just a toggle.
-    # Turning it off manually cancels Turbo early.
     cv.Optional(CONF_TURBO): switch.switch_schema(
         TurboSwitch,
         entity_category=ENTITY_CATEGORY_CONFIG,

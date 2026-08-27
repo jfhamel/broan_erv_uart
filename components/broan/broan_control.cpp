@@ -123,15 +123,14 @@ void BroanComponent::setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, 
 	writeRegisters( vecFields );
 }
 
+// Sends new filter life to ERV in three steps (to mimic wall controller)
+// 1. Write new filter life with FilterLifeStage (09:30)
+// 2. Write FilterReset=1 + filter life in (08:30)
+// 3. Write new filter life again, alone
+// Not sur why new filter life needs to be repeated three times
+// and if all this is necessary.
 void BroanComponent::setFilterLife( uint32_t days )
 {
-	// Two-message sequence confirmed by capture (2026-08-19), matching exactly
-	// what the wall controller does: stage the desired value in FilterLifeStage
-	// (09:30) FIRST, THEN trigger FilterReset (01:30=1) combined with FilterLife
-	// (08:30) in a second message. A single combined write (what an earlier
-	// version of this did) was accepted on the wire but silently had no effect -
-	// the ERV appears to need the staged value present before it'll apply
-	// anything other than its own default.
 	uint32_t unNewFilterLife = days * 24u * 60u * 60u;
 
 	ESP_LOGI("broan_control", "Set filter life to %u days (%u s)", days, unNewFilterLife);
@@ -149,13 +148,10 @@ void BroanComponent::setFilterLife( uint32_t days )
 	writeRegisters( vecApply );
 }
 
+// Public bridge for filter reset
 void BroanComponent::applyFilterLifeReset()
 {
-	// Public bridge for FilterLifeResetButton::press_action(): the pointer
-	// itself (filter_life_reset_duration_number_) is protected (see SUB_NUMBER
-	// in broan.h), so an external entity class can't read ->state directly -
-	// this method does it from inside BroanComponent, which has access.
-	float months = 3.f; // fallback if the number isn't configured in YAML
+	float months = 3.f;
 
 #ifdef USE_NUMBER
 	if( filter_life_reset_duration_number_ )
@@ -317,14 +313,18 @@ void BroanComponent::setTurbo( bool enable )
 	}
 }
 
+// This function allows the user to select between:
+// a. ESP32 controls the ERV through HA. The wall controller must therefore be disconnected.
+// b. Wall controller controls the ERV. The ESP32 listen the traffic on the bus but stays quiet.
+// On/off of wall controller can easily be controlled with a GPIO/relay on the board.
 void BroanComponent::setListenOnly( bool enable )
 {
 	ESP_LOGI("broan_control", "Set listen only: %s", enable ? "ON" : "OFF");
 	m_bListenOnly = enable;
 
+#ifdef USE_SENSOR
 	// In listenOnly mode, fan speeds are not published by the ERV
 	// so we show unavialable.
-#ifdef USE_SENSOR
 	if( enable )
 	{
 		if( supply_cfm_sensor_ ) supply_cfm_sensor_->publish_state(NAN);
@@ -332,10 +332,10 @@ void BroanComponent::setListenOnly( bool enable )
 		if( supply_rpm_sensor_ ) supply_rpm_sensor_->publish_state(NAN);
 		if( exhaust_rpm_sensor_ ) exhaust_rpm_sensor_->publish_state(NAN);
 	}
+	// When returning control to ERV, immediately update humidity and temperature
+	// with HA sensor values rather than wait 20.3 seconds.
 	else
 	{
-		// When returning control to ERV, immediately update humidity and temperature
-		// with HA sensor values rather than wait 20.3 seconds.
 		if( m_bHaveHumidity )
 			setCurrentHumidity( m_flLastHumidity );
 		if( m_bHaveTemperature )

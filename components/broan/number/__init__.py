@@ -37,9 +37,6 @@ CONF_FILTER_LIFE_RESET_DURATION = "filter_life_reset_duration"
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
-        # Only applies when fan_mode is set to "exchange_adjustable" - confirmed by
-        # capture that ExchangeMin/Max and the plain "exchange_med" all ignore a
-        # custom CFM target (see BroanComponent::setFanSpeed()).
         cv.Optional(CONF_FAN_SPEED): number.number_schema(
             FanSpeedNumber,
             device_class=DEVICE_CLASS_SPEED,
@@ -60,20 +57,13 @@ CONFIG_SCHEMA = cv.Schema(
             unit_of_measurement=UNIT_MINUTE,
             icon=ICON_TIMER,
         ),
-        # Choosing a value here also starts/updates Turbo directly (see
-        # TurboDurationNumber::control()) - there's no separate "start" action needed
-        # beyond the turbo switch, this just sets/adjusts how long it runs.
-        cv.Optional(CONF_TURBO_DURATION): number.number_schema(
+		cv.Optional(CONF_TURBO_DURATION): number.number_schema(
             TurboDurationNumber,
             entity_category=ENTITY_CATEGORY_CONFIG,
             unit_of_measurement=UNIT_MINUTE,
             icon=ICON_TIMER,
         ),
-        # Pure value holder (matches the wall controller, which offers 1-24
-        # months) - picking a value here doesn't write anything on its own, it's
-        # only applied when the filter_life_reset button is pressed (see
-        # BroanComponent::applyFilterLifeReset()).
-        cv.Optional(CONF_FILTER_LIFE_RESET_DURATION): number.number_schema(
+         cv.Optional(CONF_FILTER_LIFE_RESET_DURATION): number.number_schema(
             FilterLifeResetDurationNumber,
             entity_category=ENTITY_CATEGORY_CONFIG,
             unit_of_measurement=UNIT_MONTH,
@@ -101,7 +91,6 @@ async def to_code(config):
         cg.add(broan_component.set_humidity_setpoint_number(h))
 
     if intermittent_period_config := config.get(CONF_INT_PERIOD):
-        # Minutes. Wire register is seconds - converted in IntermittentPeriodNumber::control().
         h = await number.new_number(
             intermittent_period_config, min_value=10, max_value=50, step=5
         )
@@ -109,8 +98,6 @@ async def to_code(config):
         cg.add(broan_component.set_intermittent_period_number(h))
 
     if turbo_duration_config := config.get(CONF_TURBO_DURATION):
-        # Minutes, 0-4h in 15 minute steps. 0 means "not set" - starting Turbo with
-        # this at 0 is refused (see BroanComponent::setTurbo()).
         t = await number.new_number(
             turbo_duration_config, min_value=0, max_value=240, step=15
         )
@@ -118,7 +105,6 @@ async def to_code(config):
         cg.add(broan_component.set_turbo_duration_number(t))
 
     if filter_life_reset_duration_config := config.get(CONF_FILTER_LIFE_RESET_DURATION):
-        # Months, 1-24 - matches the wall controller's own range.
         f = await number.new_number(
             filter_life_reset_duration_config, min_value=1, max_value=24, step=1
         )
