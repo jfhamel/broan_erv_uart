@@ -56,7 +56,7 @@ Le cycle de lecture normal interroge en boucle un ensemble fixe de registres (te
 |---|---|---|
 | `00 20` | uint8 | **Mode commandé complet** (voir table section 5) — englobe tous les modes, y compris Turbo/Absence/Deshumidistat |
 | `02 20` | uint8 | Mode de **base commandé** — reste sur le dernier mode « normal » pendant qu'un mode superposé (Turbo/Absence/Deshumidistat) est actif. **Ne reflète pas la bascule interne du mode Smart** entre échange et recirculation (voir `07 20` et section 7) — reste figé sur `0x11` tout du long dans ce cas précis. Exposé comme `base_fan_mode` |
-| `07 20` | uint8 | **VentilationState.** Code d'état couvrant tous les modes, pas seulement échange/recirculation : `00`=off, `01`=exchange, `02`=deshumidistat, `03`=turbo, `04`=exchange (fonctionnellement identique à `01`, différence non comprise au niveau de la configuration physique de l'appareil), `05`=override (Ovr/boost salle de bain), `06`=recirculation min, `07`=recirculation max, `08`=recirculation medium. Change de façon fiable dans tous les sens, y compris à l'intérieur du mode Smart où ni `00 20` ni `02 20` ne bougent, et pour les deux phases (repos/actif) d'Absence et Intermittent. Exposé comme `ventilation_state` |
+| `07 20` | uint8 | **Code d'état de l'ERV** Indique le mode réel de fonctionnement de l'ERV comme recirculation ou échange et la vitesse des ventilateurs (min, med, max). Voir table section 7 pour les différents états. Exposé comme `ventilation_state` |
 | `01 E0` | float32 LE | Température (°C), capteur d'admission de l'ERV. **Non représentative en recirculation** (l'air admis est alors de l'air recyclé, pas extérieur) — le composant HA publie `NAN`/indisponible dans ce cas plutôt que la valeur mesurée |
 | `08 E0`, `09 E0` | float32 LE | Deux capteurs additionnels, jamais documentés par ailleurs. Tous deux dérivent lentement et continûment (aucun saut discret observé) — probablement d'autres points de mesure de température, mais rôle exact (admission/évacuation/cœur d'échange?) non confirmé. Déclarés avec un taux de rafraîchissement `NEVER` — jamais interrogés activement par le composant, seulement observables en écoute passive si le contrôleur mural les interroge lui-même |
 | `08 30` | uint32 LE (secondes) | **Durée de vie restante du filtre**, en secondes — lu en continu, alimente le capteur `filter_life`. Aussi écrit lors d'un reset (voir section 11) |
@@ -122,18 +122,14 @@ Le registre est un vrai code d'état par mode/palier, pas un simple binaire éch
 | `07 20` | Signification |
 |---|---|
 | `00` | Off, et phase de repos d'Absence |
-| `01` | Exchange (Smart en échange interne, Intermittent en phase active) |
-| `02` | Deshumidistat |
+| `01` | Échange min |
+| `02` | Échange max |
 | `03` | Turbo |
-| `04` | Exchange (Cont Med direct, phase active d'Absence) — **fonctionnellement identique à `01`, la différence entre les deux n'est pas comprise du point de vue de la configuration physique de l'appareil** |
-| `05` | Override (Ovr / boost salle de bain) |
-| `06` | Recirculation min (Smart en recirculation interne, Intermittent en phase repos, Recirc Min direct) |
+| `04` | Échange medium |
+| `05` | Override |
+| `06` | Recirculation min  |
 | `07` | Recirculation max |
 | `08` | Recirculation medium |
-
-Notes :
-- Absence et Intermittent partagent chacun leurs deux phases avec les codes déjà établis (`00`/`06` pour repos-recirc, `01`/`04` pour actif-échange selon le cas) plutôt que d'avoir leurs propres codes dédiés.
-- Cont Min/Max (paliers directs de l'échange via les boutons physiques du contrôleur mural) restent non testés — la roulette `fan_speed` de HA ne change jamais `FanMode`, elle ajuste uniquement la cible CFM en restant sur Cont Med (`0x0B`/`07 20=04`).
 
 **Conséquences pour l'implémentation** :
 - `ventilation_state` (text_sensor) est entièrement basé sur `07 20`, simplifié à 6 valeurs pour l'usage courant : `off`, `exchange` (englobe `01`/`04`), `deshumidistat`, `turbo`, `override`, `recirculation` (englobe `06`/`07`/`08`). Ne dépend pas de `00 20`.
@@ -151,6 +147,7 @@ Particularités :
 - Contrairement au Turbo, **aucune écriture explicite de `00 20=0x0D`** n'est nécessaire — l'ERV bascule lui-même son registre `00 20` sur `0x0D` dès que `0F 22=1` est reçu.
 - Changer le seuil en cours d'activation (ex. 45%→55%→60%) ne nécessite pas de réécrire les drapeaux `0F 22`/`10 22` à chaque fois — seuls `0A 22`/`0C 22` sont réécrits.
 - Comme pour le Turbo, `02 20` reste figé sur le mode de base (ex. Cont min) pendant toute la durée de l'activation — c'est le mode vers lequel l'ERV revient une fois le seuil d'humidité atteint.
+- **Verrouillage total de `FanMode` pendant que le Deshumidistat est actif** : toute tentative d'écrire `00 20` (Exchange min/med/max, Recirculation min/med/max, Turbo, Absence, Off — testé sur ces cinq familles) est acquittée au niveau transport (`41 00 20`) mais **n'a aucun effet réel** — `00 20` reste à `0x0D` et `07 20` reste à `0x02`. Seule la désactivation du Deshumidistat (`0F 22=0`) libère à nouveau `FanMode`.
 
 ## 9. Boost salle de bain — fonctionnement détaillé
 

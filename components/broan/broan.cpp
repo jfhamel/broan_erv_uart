@@ -358,10 +358,10 @@ std::string BroanComponent::ventilationStateToString( uint8_t ventilationState )
 	switch( ventilationState )
 	{
 		case 0x00: return "off";
-		case 0x01: // 0x01 and 0x04 are both exchange, do not know why there are two values for one mode.
-		case 0x04: return "exchange";
-		case 0x02: return "deshumidistat";
+		case 0x01: return "exchange min";
+		case 0x02: return "exchange max";
 		case 0x03: return "turbo";
+		case 0x04: return "exchange med";
 		case 0x05: return "override";
 		case 0x06: return "recirculation min";
 		case 0x07: return "recirculation max";
