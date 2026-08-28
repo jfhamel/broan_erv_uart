@@ -363,9 +363,9 @@ std::string BroanComponent::ventilationStateToString( uint8_t ventilationState )
 		case 0x02: return "deshumidistat";
 		case 0x03: return "turbo";
 		case 0x05: return "override";
-		case 0x06: // 0x06, 0x07, 0x08 all return reciculate whatever is the speed.
-		case 0x07:
-		case 0x08: return "recirculation";
+		case 0x06: return "recirculation min";
+		case 0x07: return "recirculation max";
+		case 0x08: return "recirculation med";
 		default: return "unknown";
 	}
 }
