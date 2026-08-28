@@ -9,7 +9,7 @@ void BroanComponent::setFanMode( std::string mode )
 
 	// Basic selectable modes to mimic the wall controller options for HA.
 	// Turbo and humiditstat are modes that apply over these modes with switched in HA.
-	// Override is settable by the physical swicth, no interface here.
+	// Boost is settable by the physical swicth, no interface here.
 	// exchange_adjustable does not exist on the wall controller but
 	// left avilable in HA as an interesting feature.
 	bool bAdjustable = false;

@@ -141,7 +141,7 @@ sensor:
     indoor_humidity:
       name: "Humidité intérieure"
 
-    override_remaining:
+    boost_remaining:
       name: "Temps restant turbo SdB"
 
     turbo_remaining:

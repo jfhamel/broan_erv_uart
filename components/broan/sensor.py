@@ -28,7 +28,7 @@ CONF_EXHAUST_RPM = "exhaust_fan_rpm"
 CONF_INDOOR_TEMPERATURE = "indoor_temperature"
 CONF_INDOOR_HUMIDITY = "indoor_humidity"
 CONF_TURBO_REMAINING = "turbo_remaining"
-CONF_OVERRIDE_REMAINING = "override_remaining"
+CONF_BOOST_REMAINING = "boost_remaining"
 
 UNIT_CFM = "CFM"
 UNIT_RPM = "RPM"
@@ -91,7 +91,7 @@ CONFIG_SCHEMA = cv.Schema(
             icon=ICON_TIMER,
             unit_of_measurement=UNIT_MINUTE,
         ),
-        cv.Optional(CONF_OVERRIDE_REMAINING): sensor.sensor_schema(
+        cv.Optional(CONF_BOOST_REMAINING): sensor.sensor_schema(
             icon=ICON_TIMER,
             unit_of_measurement=UNIT_MINUTE,
         ),
@@ -144,6 +144,6 @@ async def to_code(config):
         sens = await sensor.new_sensor(turbo_remaining_config)
         cg.add(broan_component.set_turbo_remaining_sensor(sens))
 
-    if override_remaining_config := config.get(CONF_OVERRIDE_REMAINING):
-        sens = await sensor.new_sensor(override_remaining_config)
-        cg.add(broan_component.set_override_remaining_sensor(sens))
+    if boost_remaining_config := config.get(CONF_BOOST_REMAINING):
+        sens = await sensor.new_sensor(boost_remaining_config)
+        cg.add(broan_component.set_boost_remaining_sensor(sens))

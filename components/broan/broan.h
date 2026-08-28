@@ -73,7 +73,7 @@ enum BroanCFMMode
 enum BroanFanMode
 {
 	Off = 0x01,
-	Ovr = 0x02,             // Bathroom boost button (dry contact on the OVR terminal). Read-only: never written over RS-485.
+	Boost = 0x02,             // Bathroom boost button (dry contact on the OVR terminal). Read-only: never written over RS-485.
 	RecirculateMin = 0x05,
 	RecirculateMax = 0x06,
 	RecirculateMed = 0x07,
@@ -98,7 +98,7 @@ enum BroanField
 	TurboDuration,   // Write-only. Seconds. Written together with FanMode=Turbo in a single frame.
 
 	// Info
-	BaseMode,        // Read-only. What the ERV is actually doing underneath Turbo/Absence/Humidity/Ovr.
+	BaseMode,        // Read-only. What the ERV is actually doing underneath Turbo/Absence/Humidity/Boost.
 	Uptime, // In seconds?
 	Wattage,
 	TemperatureIn,
@@ -108,8 +108,8 @@ enum BroanField
 	SupplyRPM,
 	ExhaustRPM,
 	TurboRemaining,  // Read-only. Seconds left on the current Turbo/boost timer (register 04:30).
-	OvrRemaining,    // Read-only. Seconds left on the current bathroom (Ovr) boost timer (register 03:30).
-	OverrideActiveFlag,   // 02:30. Toggles 01<->00 whenever an override (Turbo/Ovr/etc) starts.
+	BoostRemaining,    // Read-only. Seconds left on the current bathroom boost timer (register 03:30).
+	OverrideActiveFlag,   // 02:30. Toggles 01<->00 whenever an override (Turbo/Boost/etc) starts.
 	VentilationState,     // 07:20. ERV real ventilation mode, especially usefull to know what it is doing when in smart mode.
 
 	// Speeds
@@ -187,7 +187,7 @@ class BroanComponent : public Component, public uart::UARTDevice
 	SUB_SENSOR(indoor_temperature)
 	SUB_SENSOR(indoor_humidity)
 	SUB_SENSOR(turbo_remaining)
-	SUB_SENSOR(override_remaining)
+	SUB_SENSOR(boost_remaining)
 #endif
 
 #ifdef USE_TEXT_SENSOR
@@ -243,7 +243,7 @@ public:
 		{ 0x03, 0x10, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // Intake RPM
 		{ 0x04, 0x10, BroanFieldType::Float, {0}, UPDATE_RATE_FAST }, // Exhaust RPM
 		{ 0x04, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // TurboRemaining (seconds)
-		{ 0x03, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // OvrRemaining (seconds) - bathroom (Ovr) boost countdown
+		{ 0x03, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // BoostRemaining (seconds) - bathroom boost countdown
 		{ 0x02, 0x30, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // OverrideActiveFlag
 		{ 0x07, 0x20, BroanFieldType::Byte, {0}, UPDATE_RATE_FAST }, // VentilationState
 

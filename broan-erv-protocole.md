@@ -126,13 +126,13 @@ Le registre est un vrai code d'état par mode/palier, pas un simple binaire éch
 | `02` | Échange max |
 | `03` | Turbo |
 | `04` | Échange medium |
-| `05` | Override |
+| `05` | Boost |
 | `06` | Recirculation min  |
 | `07` | Recirculation max |
 | `08` | Recirculation medium |
 
 **Conséquences pour l'implémentation** :
-- `ventilation_state` (text_sensor) est entièrement basé sur `07 20`, simplifié à 6 valeurs pour l'usage courant : `off`, `exchange` (englobe `01`/`04`), `deshumidistat`, `turbo`, `override`, `recirculation` (englobe `06`/`07`/`08`). Ne dépend pas de `00 20`.
+- `ventilation_state` (text_sensor) est entièrement basé sur `07 20`, simplifié à 6 valeurs pour l'usage courant : `off`, `exchange` (englobe `01`/`04`), `deshumidistat`, `turbo`, `boost`, `recirculation` (englobe `06`/`07`/`08`). Ne dépend pas de `00 20`.
 - La température extérieure (`01 E0`) est publiée comme indisponible (`NAN`) quand `07 20` indique la recirculation — la sonde d'admission ne capte alors que de l'air recyclé, pas l'air extérieur réel.
 - Republication immédiate des deux au changement de `07 20`, sans attendre le prochain cycle de lecture de `01 E0`.
 
@@ -163,7 +163,7 @@ Boutons muraux dédiés (20 / 40 / 60 minutes), câblés séparément du contrô
 
 **Conclusion : les boutons de la salle de bain sont des contacts secs câblés sur la borne OVR (override) de l'ERV** — une entrée physique dédiée, indépendante du bus RS-485. C'est l'ERV qui détecte la fermeture du contact, démarre son minuteur interne et l'expose en lecture seule — le contrôleur (et notre `echangeur`) ne fait qu'observer via le polling normal, sans jamais rien écrire. Il n'y a donc **aucun moyen de déclencher ce mode par écriture RS-485** — seulement de le lire.
 
-Le composant n'implante pas de déclenchement de ce mode depuis Home Assistant (impossible de toute façon, vu le mécanisme). Il expose plutôt la lecture de l'état : mode actif « Boost salle de bain » (via `00 20=0x02`) et le temps restant (`03 30`), pour distinguer ce cas des autres modes/overrides plutôt que de simplement voir une vitesse élevée sans explication.
+Le composant n'implante pas de déclenchement de ce mode depuis Home Assistant. Il expose plutôt la lecture de l'état : mode actif « Boost salle de bain » (via `00 20=0x02`) et le temps restant (`03 30`), pour distinguer ce cas des autres modes plutôt que de simplement voir une vitesse élevée sans explication.
 
 Comme pour les autres overrides, `02 20` reste figé sur le mode de base pendant toute la durée du boost, et l'ERV y revient seul une fois le minuteur à zéro (ou sur annulation).
 

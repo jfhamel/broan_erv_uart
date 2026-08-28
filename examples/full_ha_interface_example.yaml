@@ -147,7 +147,7 @@ sensor:
     indoor_humidity:
       name: "Indoor Humidity"
 
-    override_remaining:
+    boost_remaining:
       name: "Bathroom Boost Remaining"
 
     turbo_remaining:

@@ -335,7 +335,7 @@ std::string BroanComponent::fanModeToString( uint8_t value )
 {
 	switch( value )
 	{
-		case BroanFanMode::Ovr: return "ovr";
+		case BroanFanMode::Boost: return "boost";
 		case BroanFanMode::Intermittent: return "intermittent";
 		case BroanFanMode::ExchangeMin: return "exchange_min";
 		case BroanFanMode::ExchangeMax: return "exchange_max";
@@ -362,7 +362,7 @@ std::string BroanComponent::ventilationStateToString( uint8_t ventilationState )
 		case 0x02: return "exchange max";
 		case 0x03: return "turbo";
 		case 0x04: return "exchange med";
-		case 0x05: return "override";
+		case 0x05: return "boost";
 		case 0x06: return "recirculation min";
 		case 0x07: return "recirculation max";
 		case 0x08: return "recirculation med";
@@ -419,11 +419,11 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 
 #ifdef USE_SELECT
 				// Publish commanded_fan_mode for available options only.
-				// Turbo, humidity and Ovr are not available to selection.
+				// Turbo, humidity and Boost are not available to selection.
 				if( commanded_fan_mode_select_ &&
 				    val != BroanFanMode::Turbo &&
 				    val != BroanFanMode::Humidity &&
-				    val != BroanFanMode::Ovr )
+				    val != BroanFanMode::Boost )
 					commanded_fan_mode_select_->publish_state( fanModeToString( val ) );
 #endif
 
@@ -436,8 +436,8 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( turbo_remaining_sensor_ )
 					turbo_remaining_sensor_->publish_state( val == BroanFanMode::Turbo ? m_vecFields[TurboRemaining].m_value.m_nValue / 60.f : 0.f );
 
-				if( override_remaining_sensor_ )
-					override_remaining_sensor_->publish_state( val == BroanFanMode::Ovr ? m_vecFields[OvrRemaining].m_value.m_nValue / 60.f : 0.f );
+				if( boost_remaining_sensor_ )
+					boost_remaining_sensor_->publish_state( val == BroanFanMode::Boost ? m_vecFields[BoostRemaining].m_value.m_nValue / 60.f : 0.f );
 #endif
 			}
 			break;
@@ -568,13 +568,13 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 			}
 			break;
 
-			case BroanField::OvrRemaining:
+			case BroanField::BoostRemaining:
 			{
-				if( !override_remaining_sensor_ )
+				if( !boost_remaining_sensor_ )
 					continue;
 
-				if( m_vecFields[FanMode].m_value.m_chValue == BroanFanMode::Ovr )
-					override_remaining_sensor_->publish_state( pField->m_value.m_nValue / 60.f );
+				if( m_vecFields[FanMode].m_value.m_chValue == BroanFanMode::Boost )
+					boost_remaining_sensor_->publish_state( pField->m_value.m_nValue / 60.f );
 			}
 			break;
 
@@ -875,7 +875,7 @@ void BroanComponent::publishBusDisconnected()
 	if( supply_rpm_sensor_ ) supply_rpm_sensor_->publish_state(NAN);
 	if( exhaust_rpm_sensor_ ) exhaust_rpm_sensor_->publish_state(NAN);
 	if( turbo_remaining_sensor_ ) turbo_remaining_sensor_->publish_state(NAN);
-	if( override_remaining_sensor_ ) override_remaining_sensor_->publish_state(NAN);
+	if( boost_remaining_sensor_ ) boost_remaining_sensor_->publish_state(NAN);
 #endif
 
 #ifdef USE_TEXT_SENSOR
