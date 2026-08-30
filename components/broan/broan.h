@@ -69,7 +69,6 @@ enum BroanCFMMode
 	Both = BroanCFMMode::Input | BroanCFMMode::Output,
 };
 
-// Values for register 00:20 (commanded mode) and 02:20 (base/underlying mode).
 enum BroanFanMode
 {
 	Off = 0x01,
@@ -83,7 +82,7 @@ enum BroanFanMode
 	ExchangeMedManual = 0x0b, // Continuous exchange, "medium" and adjustable CFM target (06:22/08:22).
 	Turbo = 0x0c,
 	Humidity = 0x0d,
-	Away = 0x0F,            // Absence (weekly presence schedule override)
+	Away = 0x0F,            // Absence (for configurable schedule)
 	Smart = 0x11,
 };
 
