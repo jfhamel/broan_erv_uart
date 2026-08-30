@@ -42,60 +42,59 @@ Le cycle de lecture normal interroge en boucle un ensemble fixe de registres (te
 
 ## 4. Registres connus
 
-### Déjà documentés sur spitko.net
-
-| Registre | Contenu |
-|---|---|
-| `14 00` | Uptime, en secondes |
-| `02 20` | Mode de l'ERV (partiel, voir section 5) : `0A`=MAX, `09`=MIN, `01`=STB (standby) |
-| `08 22`, `06 22` | Vitesse en % (0%→32, 100%→175 selon l'échelle observée par spitko.net), écrits ensemble. **Applicable uniquement en mode continu (Manual/`0x0B`)** : en recirculation, l'ERV ignore complètement une cible personnalisée écrite ici, le débit réel reste figé peu importe la valeur envoyée. La recirculation n'a donc que 3 paliers fixes, jamais de vitesse continue |
-
-### Registres additionnels
+### Compris et utilisés dans le composant
 
 | Registre | Type | Contenu |
 |---|---|---|
-| `00 20` | uint8 | **Mode commandé complet** (voir table section 5), englobe tous les modes, y compris Turbo/Absence/Deshumidistat |
-| `02 20` | uint8 | Mode de **base commandé**, reste sur le dernier mode « normal » pendant qu'un mode superposé (Turbo/Absence/Deshumidistat) est actif. **Ne reflète pas la bascule interne du mode Smart** entre échange et recirculation (voir `07 20` et section 7), reste figé sur `0x11` tout du long dans ce cas précis. Exposé comme `base_fan_mode` |
-| `07 20` | uint8 | **Code d'état de l'ERV** Indique le mode réel de fonctionnement de l'ERV comme recirculation ou échange et la vitesse des ventilateurs (min, med, max). Voir table section 7 pour les différents états. Exposé comme `ventilation_state` |
-| `01 E0` | float32 LE | Température (°C), capteur d'admission de l'ERV. **Non représentative en recirculation** (l'air admis est alors de l'air recyclé, pas extérieur), le composant HA publie `NAN`/indisponible dans ce cas plutôt que la valeur mesurée |
-| `07 E0`, `08 E0`, `09 E0` | float32 LE | Possiblement trois capteurs, jamais documentés par ailleurs. Tous trois dérivent lentement et continûment, probablement d'autres points de mesure de température, mais rôle exact (admission/évacuation/cœur d'échange?) non confirmé. |
-| `0A E0`, `0B E0`, `0C E0`, `0D E0` | float32 LE | Toujours `-1.0` (`00 00 80 BF`) sur cette unité, probablement un marqueur « capteur non présent/non applicable sur ce modèle » plutôt qu'une vraie mesure |
-| `08 30` | uint32 LE (secondes) | **Durée de vie restante du filtre**, en secondes, lu en continu, alimente le capteur `filter_life`. Aussi écrit lors d'un reset (voir section 11) |
-| `01 30` | uint8 | **FilterReset**, mettre à `1` déclenche l'application de la valeur préchargée dans `09 30` vers `08 30` |
-| `09 30` | uint32 LE (secondes) | **FilterLifeStage.** Le contrôleur mural y écrit la valeur désirée (en secondes) **avant** de déclencher `01 30=1`, agit comme un registre de « préchargement » que `FilterReset` applique ensuite à `08 30`. Voir section 11 pour la séquence complète |
-| `0A F0` | bloc complexe (~120 octets) | Structure multi-champs distincte de `08 30`, contient plusieurs sous-valeurs (probablement historique/statistiques du filtre ou d'autres capteurs), pas décortiquée en détail |
-| `04 50` | float32 LE | **Humidité ambiante (%)**, écrite par l'appareil qui contrôle le bus (broadcast périodique, ~20.3s d'intervalle). **Provient du contrôleur mural physique s'il est présent sur le bus, sinon, cette valeur doit être fournie par un autre instrument** (capteur HA, sonde câblée), puisqu'un seul contrôleur peut être actif à la fois et que l'ERV n'a pas de capteur d'humidité à lui |
-| `05 50` | float32 LE | **Température ambiante (°C)**, transmise avec `04 50` dans le même paquet, même origine que ci-dessus (contrôleur mural, ou instrument de remplacement), distinct du `01 E0` de l'ERV |
+| `00 20` | uint8 | **Mode commandé complet** (voir table section 5), englobe tous les modes, y compris Turbo/Absence/Deshumidistat. |
+| `00 22` | uint32 LE (secondes) | **Durée du Turbo choisie** (1h=3600, 2h=7200, 4h=14400), écrit une seule fois par le contrôleur à l'activation, dans la même trame que `00 20=0x0C`. |
+| `01 30` | uint8 | **FilterReset**, mettre à `1` déclenche l'application de la valeur préchargée dans `09 30` vers `08 30`. |
+| `01 E0` | float32 LE | Température (°C), capteur d'admission de l'ERV. **Non représentative en recirculation** (l'air admis est alors de l'air recyclé, pas extérieur), le composant HA publie `NAN`/indisponible dans ce cas plutôt que la valeur mesurée. |
+| `02 20` | uint8 | Mode de **base commandé** (documenté partiellement sur spitko.net : `0A`=MAX, `09`=MIN, `01`=STB), reste sur le dernier mode « normal » pendant qu'un mode superposé (Turbo/Absence/Deshumidistat) est actif. **Ne reflète pas la bascule interne du mode Smart** entre échange et recirculation (voir `07 20` et section 7), reste figé sur `0x11` tout du long dans ce cas précis. Exposé comme `base_fan_mode`. |
+| `03 30` | uint16 LE (secondes) | **Compte à rebours du Boost salle de bain**, même comportement que `04 30` (Turbo), registre distinct. |
+| `04 30` | uint16 LE (secondes) | **Compte à rebours Turbo**, décrémente en temps réel, maintenu et rapporté par l'ERV. |
+| `04 50` | float32 LE | **Humidité ambiante (%)**, écrite par l'appareil qui contrôle le bus (broadcast périodique, ~20.3s d'intervalle). **Provient du contrôleur mural physique s'il est présent sur le bus, sinon, cette valeur doit être fournie par un autre instrument** (capteur HA, sonde câblée), puisqu'un seul contrôleur peut être actif à la fois et que l'ERV n'a pas de capteur d'humidité à lui. |
+| `05 50` | float32 LE | **Température ambiante (°C)**, transmise avec `04 50` dans le même paquet, même origine que ci-dessus (contrôleur mural, ou instrument de remplacement), distinct du `01 E0` de l'ERV. |
+| `06 22`, `08 22` | float32 LE | Vitesse en % (0%→32, 100%→175 selon l'échelle observée par spitko.net), écrits ensemble. **Applicable uniquement en mode continu (Manual/`0x0B`)** : en recirculation, l'ERV ignore complètement une cible personnalisée écrite ici, le débit réel reste figé peu importe la valeur envoyée. La recirculation n'a donc que 3 paliers fixes, jamais de vitesse continue. |
+| `07 20` | uint8 | **Code d'état de l'ERV.** Indique le mode réel de fonctionnement de l'ERV comme recirculation ou échange et la vitesse des ventilateurs (min, med, max). Voir table section 7 pour les différents états. Exposé comme `ventilation_state`. |
+| `08 30` | uint32 LE (secondes) | **Durée de vie restante du filtre**, en secondes, lu en continu, alimente le capteur `filter_life`. Aussi écrit lors d'un reset (voir section 11). |
+| `09 30` | uint32 LE (secondes) | **FilterLifeStage.** Le contrôleur mural y écrit la valeur désirée (en secondes) **avant** de déclencher `01 30=1`, agit comme un registre de « préchargement » que `FilterReset` applique ensuite à `08 30`. Voir section 11 pour la séquence complète. |
+| `0A 22`, `0C 22` | float32 LE (%) | **Seuil d'humidité cible** du Deshumidistat, les deux registres reçoivent toujours la même valeur. |
+| `0F 22` | uint8 (bool) | Drapeau d'activation du Deshumidistat (`01`=actif). |
+| `14 00` | uint32 LE (secondes) | **Uptime** de l'ERV, documenté sur spitko.net. |
+
+### Signification incertaine
+
+| Registre | Type | Contenu |
+|---|---|---|
 | `00 50` | uint8 | Écriture périodique (~10s), valeur toujours `00`, vraisemblablement un heartbeat/keep-alive, sens exact inconnu |
-| `04 30` | uint16 LE (secondes) | **Compte à rebours Turbo**, décrémente en temps réel, maintenu et rapporté par l'ERV |
-| `00 22` | uint32 LE (secondes) | **Durée du Turbo choisie** (1h=3600, 2h=7200, 4h=14400), écrit une seule fois par le contrôleur à l'activation, dans la même trame que `00 20=0x0C` |
-| `0A 22`, `0C 22` | float32 LE (%) | **Seuil d'humidité cible** du Deshumidistat, les deux registres reçoivent toujours la même valeur |
-| `0F 22` | uint8 (bool) | Drapeau d'activation du Deshumidistat (`01`=actif) |
-| `10 22` | uint8 (bool) | Second drapeau, toujours `00` observé, rôle encore incertain |
-| `02 30`, `08 20`, `03 20` | uint8 | `02 30` reste constant à `01`, `08 20` reste constant à `00`, `03 20` répond systématiquement avec une longueur nulle. Fonction inconnue. |
-| `03 30` | uint16 LE (secondes) | **Compte à rebours du Boost salle de bain**, même comportement que `04 30` (Turbo), registre distinct |
+| `02 30`, `03 20`, `08 20` | uint8 | `02 30` reste constant à `01`, `03 20` répond systématiquement avec une longueur nulle, `08 20` reste constant à `00`. Fonction inconnue |
+| `07 E0`, `08 E0`, `09 E0` | float32 LE | Possiblement trois capteurs, jamais documentés par ailleurs. Tous trois dérivent lentement et continûment, probablement d'autres points de mesure de température, mais rôle exact (admission/évacuation/cœur d'échange?) non confirmé |
 | `09 40` | float32 LE | Seule valeur non nulle du groupe `40` lors d'un balayage complet (tout le reste du groupe répond `0`/vide), ~2434.6 observé, rôle inconnu |
+| `0A E0`, `0B E0`, `0C E0`, `0D E0` | float32 LE | Toujours `-1.0` (`00 00 80 BF`) sur cette unité, probablement un marqueur « capteur non présent/non applicable sur ce modèle » plutôt qu'une vraie mesure |
+| `0A F0` | bloc complexe (120 octets) | Statique sur toute la durée d'un log (identique à chaque lecture), donc pas de la télémétrie en direct. Structure identifiée : 10 blocs de 12 octets, 7 « peuplés » (`32 00 00 00` + deux valeurs de 4 octets partageant les mêmes 2 octets de poids fort) et 3 « vides » (`FF FF FF FF` + deux zéros, même marqueur « absent » que `0A`-`0D E0`). Probablement un historique/des statistiques (filtre ou autre), pas encore corrélé à un événement précis |
 | `0C 50`, `0D 50`, `10 50`, `11 50`, `17 50`, `18 50` | float32 LE | Valeurs (65-122) du même ordre de grandeur que les CFM mesurés, possiblement d'autres cibles de débit (paliers Intermittent/Recirculation?) non encore mappées à une entité HA |
-| `24 50` | float32 LE | ~16.67 observé, rôle inconnu, possiblement un pourcentage ou un ratio |
+| `10 22` | uint8 (bool) | Second drapeau lié au Deshumidistat, toujours `00` observé, rôle encore incertain |
 | `19 50`, `20 50`, `21 50` | uint8 | Toujours `1` observé, possiblement des drapeaux d'état/configuration |
+| `24 50` | float32 LE | ~16.67 observé, rôle inconnu, possiblement un pourcentage ou un ratio |
 
 ## 5. Table des modes (`00 20` / `02 20`)
 
 | Mode | Valeur (`00 20`) | `02 20` pendant que ce mode est actif |
 |---|---|---|
 | Off (Standby) | `0x01` | `0x01` |
-| Smart | `0x11` | `0x11` |
+| Boost salle de bain | `0x02` | *(mode de base précédent, inchangé)* |
 | Recirc min | `0x05` | `0x05` |
-| Recirc med | `0x07` | `0x07` |
 | Recirc max | `0x06` | `0x06` |
+| Recirc med | `0x07` | `0x07` |
 | Int (Intermittent) | `0x08` | `0x08` |
 | Cont min | `0x09` | `0x09` |
-| Cont med | `0x0B` | `0x0B` |
 | Cont max | `0x0A` | `0x0A` |
+| Cont med | `0x0B` | `0x0B` |
 | Turbo | `0x0C` | *(mode de base précédent, inchangé)* |
-| Absence | `0x0F` | *(mode de base précédent, inchangé)* |
 | Deshumidistat | `0x0D` | *(mode de base précédent, inchangé)* |
-| Boost salle de bain | `0x02` | *(mode de base précédent, inchangé)* |
+| Absence | `0x0F` | *(mode de base précédent, inchangé)* |
+| Smart | `0x11` | `0x11` |
 
 Les valeurs `0A`=MAX, `09`=MIN, `01`=STB documentées sur spitko.net correspondent exactement à Cont max, Cont min et Off.
 
@@ -199,11 +198,3 @@ Comme Intermittent, Absence n'est pas un état fixe : il alterne entre une **pha
 Les trois étapes sont nécessaires : `FilterReset` (`01 30=1`) seul ne suffit pas, l'ERV ignore la valeur envoyée dans `FilterLife` (`08 30`) et revient systématiquement à 90 jours pile si `FilterLifeStage` (`09 30`) n'a pas été préchargé au préalable (étape 1).
 
 Fonctionnel pour n'importe quelle valeur (pas seulement les 4 paliers du mural) une fois les trois étapes reproduites. La nécessité stricte de l'étape 3 (réécriture de `08 30` seule) n'est pas confirmée, elle est reproduite par prudence.
-
-## 12. Ce qui reste incertain
-
-- Le rôle exact du registre `10 22` (toujours `00` observé).
-- La signification précise de `02 30` (constant à `01`).
-- Pourquoi `03 20` répond systématiquement avec une longueur nulle plutôt qu'une valeur.
-- Le bloc `0A F0` (~120 octets), toujours pas décortiqué en détail.
-- Le registre `00 50` (heartbeat périodique, valeur toujours `00`).
