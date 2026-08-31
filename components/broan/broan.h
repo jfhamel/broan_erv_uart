@@ -83,7 +83,9 @@ enum BroanFanMode
 	Turbo = 0x0c,
 	Humidity = 0x0d,
 	Away = 0x0F,            // Absence (for configurable schedule)
+	Automatic = 0x10,       
 	Smart = 0x11,
+	// 0x03, 0x04, 0x0E are still missing and were rejected by ERV when tested.
 };
 
 enum BroanField

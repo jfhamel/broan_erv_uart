@@ -29,7 +29,6 @@ async def to_code(config):
         s = await select.new_select(
             commanded_fan_mode_config,
             options=[
-                "off",
                 "smart",
                 "intermittent",
                 "exchange_min",
@@ -40,6 +39,8 @@ async def to_code(config):
                 "recirculation_med",
                 "recirculation_max",
                 "absence",
+                "off",
+                "auto",
             ],
         )
         await cg.register_parented(s, config[CONF_BROAN_ID])

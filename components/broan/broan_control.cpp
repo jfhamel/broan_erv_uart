@@ -37,6 +37,8 @@ void BroanComponent::setFanMode( std::string mode )
 		value = BroanFanMode::RecirculateMax;
 	else if( mode == "absence" )
 		value = BroanFanMode::Away;
+	else if( mode == "auto" )
+		value = BroanFanMode::Automatic;
 	else
 		value = BroanFanMode::Off;
 

@@ -336,6 +336,7 @@ std::string BroanComponent::fanModeToString( uint8_t value )
 	switch( value )
 	{
 		case BroanFanMode::Boost: return "boost";
+		case BroanFanMode::Automatic: return "auto";
 		case BroanFanMode::Intermittent: return "intermittent";
 		case BroanFanMode::ExchangeMin: return "exchange_min";
 		case BroanFanMode::ExchangeMax: return "exchange_max";

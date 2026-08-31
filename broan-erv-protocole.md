@@ -57,8 +57,9 @@ Le cycle de lecture normal interroge en boucle un ensemble fixe de registres (te
 | `05 50` | float32 LE | **Température ambiante (°C)**, transmise avec `04 50` dans le même paquet, même origine que ci-dessus (contrôleur mural, ou instrument de remplacement), distinct du `01 E0` de l'ERV. |
 | `06 22`, `08 22` | float32 LE | Vitesse en % (0%→32, 100%→175 selon l'échelle observée par spitko.net), écrits ensemble. **Applicable uniquement en mode continu (Manual/`0x0B`)** : en recirculation, l'ERV ignore complètement une cible personnalisée écrite ici, le débit réel reste figé peu importe la valeur envoyée. La recirculation n'a donc que 3 paliers fixes, jamais de vitesse continue. |
 | `07 20` | uint8 | **Code d'état de l'ERV.** Indique le mode réel de fonctionnement de l'ERV comme recirculation ou échange et la vitesse des ventilateurs (min, med, max). Voir table section 7 pour les différents états. Exposé comme `ventilation_state`. |
-| `08 30` | uint32 LE (secondes) | **Durée de vie restante du filtre**, en secondes, lu en continu, alimente le capteur `filter_life`. Aussi écrit lors d'un reset (voir section 11). |
-| `09 30` | uint32 LE (secondes) | **FilterLifeStage.** Le contrôleur mural y écrit la valeur désirée (en secondes) **avant** de déclencher `01 30=1`, agit comme un registre de « préchargement » que `FilterReset` applique ensuite à `08 30`. Voir section 11 pour la séquence complète. |
+| `08 20` | uint8 (bool) | **Drapeau d'activation de la Planification** (`01`=actif). Voir section 11. Compris au niveau protocole, mais pas encore exposé par une entité du composant. |
+| `08 30` | uint32 LE (secondes) | **Durée de vie restante du filtre**, en secondes, lu en continu, alimente le capteur `filter_life`. Aussi écrit lors d'un reset (voir section 12). |
+| `09 30` | uint32 LE (secondes) | **FilterLifeStage.** Le contrôleur mural y écrit la valeur désirée (en secondes) **avant** de déclencher `01 30=1`, agit comme un registre de « préchargement » que `FilterReset` applique ensuite à `08 30`. Voir section 12 pour la séquence complète. |
 | `0A 22`, `0C 22` | float32 LE (%) | **Seuil d'humidité cible** du Deshumidistat, les deux registres reçoivent toujours la même valeur. |
 | `0F 22` | uint8 (bool) | Drapeau d'activation du Deshumidistat (`01`=actif). |
 | `14 00` | uint32 LE (secondes) | **Uptime** de l'ERV, documenté sur spitko.net. |
@@ -68,7 +69,7 @@ Le cycle de lecture normal interroge en boucle un ensemble fixe de registres (te
 | Registre | Type | Contenu |
 |---|---|---|
 | `00 50` | uint8 | Écriture périodique (~10s), valeur toujours `00`, vraisemblablement un heartbeat/keep-alive, sens exact inconnu |
-| `02 30`, `03 20`, `08 20` | uint8 | `02 30` reste constant à `01`, `03 20` répond systématiquement avec une longueur nulle, `08 20` reste constant à `00`. Fonction inconnue |
+| `02 30`, `03 20` | uint8 | `02 30` reste constant à `01`, `03 20` répond systématiquement avec une longueur nulle. Fonction inconnue |
 | `07 E0`, `08 E0`, `09 E0` | float32 LE | Possiblement trois capteurs, jamais documentés par ailleurs. Tous trois dérivent lentement et continûment, probablement d'autres points de mesure de température, mais rôle exact (admission/évacuation/cœur d'échange?) non confirmé |
 | `09 40` | float32 LE | Seule valeur non nulle du groupe `40` lors d'un balayage complet (tout le reste du groupe répond `0`/vide), ~2434.6 observé, rôle inconnu |
 | `0A E0`, `0B E0`, `0C E0`, `0D E0` | float32 LE | Toujours `-1.0` (`00 00 80 BF`) sur cette unité, probablement un marqueur « capteur non présent/non applicable sur ce modèle » plutôt qu'une vraie mesure |
@@ -94,9 +95,12 @@ Le cycle de lecture normal interroge en boucle un ensemble fixe de registres (te
 | Turbo | `0x0C` | *(mode de base précédent, inchangé)* |
 | Deshumidistat | `0x0D` | *(mode de base précédent, inchangé)* |
 | Absence | `0x0F` | *(mode de base précédent, inchangé)* |
+| Auto | `0x10` | `0x10` |
 | Smart | `0x11` | `0x11` |
 
 Les valeurs `0A`=MAX, `09`=MIN, `01`=STB documentées sur spitko.net correspondent exactement à Cont max, Cont min et Off.
+
+**Valeurs sans effet** : `0x03`, `0x04` et `0x0E` ont été testées par écriture directe de `00 20`, chacune est acquittée au niveau transport (`41 00 20`) mais l'ERV les ignore complètement, `00 20` reste inchangé. Probablement des valeurs inutilisées ou réservées à d'autres modèles/fonctionnalités.
 
 ## 6. Mode Turbo, fonctionnement détaillé
 
@@ -115,9 +119,11 @@ Pour les trois durées :
 
 ## 7. Mode Smart, bascule interne échange/recirculation
 
-Contrairement aux autres modes, Smart ne se contente pas de rester fixe : il alterne lui-même, en continu et de façon autonome, entre ventilation en **échange** (air frais admis) et **recirculation** (air recyclé), à différentes vitesse aussi, selon des conditions internes (humidité intérieure et température extérieure). Le contrôleur mural affiche cet état (échange vs recirculation) et la vitesse (min/med/max) sur son écran. Le comportement du mode Smart est partiellement document dans la feuille de spécifications des contrôleurs muraux: https://broan-nutone.com/getmedia/a91b1616-4d06-449c-abfa-0c14add1aa99/Spec_Sheet_WallControls_En_Fr.pdf?ext=.pdf.
+Contrairement aux autres modes, Smart ne se contente pas de rester fixe : il alterne lui-même, en continu et de façon autonome, entre ventilation en **échange** (air frais admis) et **recirculation** (air recyclé), à différentes vitesse aussi, selon des conditions internes (humidité intérieure et température extérieure). Le contrôleur mural affiche cet état (échange vs recirculation) et la vitesse (min/med/max) sur son écran. Le comportement du mode Smart est partiellement documenté dans la feuille de spécifications des contrôleurs muraux: https://broan-nutone.com/getmedia/a91b1616-4d06-449c-abfa-0c14add1aa99/Spec_Sheet_WallControls_En_Fr.pdf?ext=.pdf.
 
 Ni `00 20` (mode commandé) ni `02 20` (mode de base) ne bougent pendant cette bascule interne, les deux restent figés sur `0x11` (Smart) en continu, même quand le débit d'air (CFM) montre clairement des changements de palier correspondant à des transitions réelles. L'état réel de l'échangeur est plutôt stocké dans `07 20`.
+
+Le mode Auto a probablement un comportement similaire mais avec d'autres conditions tel que décrit dans la feuille de spécifications des contrôleurs. 
 
 ### Table complète de `07 20`
 
@@ -176,7 +182,26 @@ Comme Intermittent, Absence n'est pas un état fixe : il alterne entre une **pha
 
 `00 20=0x0F` pendant tout le mode (les deux phases), et `02 20` reste sur le mode de base précédent (même comportement que Turbo/Deshumidistat). Le mécanisme de programmation de l'horaire hebdomadaire (registres, format) n'a pas été analysé.
 
-## 11. Réinitialisation du filtre, séquence en trois messages
+## 11. Mode Planification, fonctionnement détaillé
+
+« Planification » est un mode sélectionnable en soi sur le contrôleur mural, au même titre que Smart ou Intermittent, mais contrairement aux autres modes, il **n'a pas de valeur `00 20` dédiée**.
+
+**Activation** : le contrôleur mural écrit `08 20=1`. C'est le seul et unique signal indiquant que la Planification est active, `00 20`/`02 20` ne changent pas de famille de valeur, ils continuent d'afficher le palier normal (Exchange/Recirculation min/med/max) que l'horaire dicte à ce moment précis.
+
+**Séquence observée à l'activation** :
+1. Passage transitoire par Off (`00 20=0x01`) pendant quelques secondes, visible à l'écran du contrôleur mural.
+2. Écriture du palier réellement programmé pour l'heure courante, toujours accompagnée de `08 20=1` dans la même trame.
+3. `08 20=1` est réécrit en boucle tant que la Planification reste active, même sans changement de palier.
+
+**Changement de phase en cours de Planification** : confirmé, le contrôleur mural envoie directement `00 20=<nouveau palier> | 08 20=1` au moment de la transition, sans registre intermédiaire annonçant le changement à l'avance.
+
+**L'horaire lui-même (heures, phases, jours) ne semble jamais transmis sur le bus RS-485** : aucune écriture de registre correspondant à une heure/un jour n'a été observée, y compris en modifiant directement l'heure de début d'une phase pendant qu'une capture tournait. Le contrôleur mural garde vraisemblablement toute cette logique en mémoire locale, et ne communique avec l'ERV qu'au moment précis d'un changement de palier, jamais les paramètres de l'horaire en tant que tels. Il est donc probablement impossible de lire ou de piloter l'horaire de Planification depuis ce composant (sauf en faisant des automatisations dans Home Assistant); seul le résultat en temps réel (le palier courant + le drapeau `08 20`) est observable.
+
+**Pourquoi `08 20` malgré tout?** Probablement pour la même raison que `02 20` (mode de base) : l'ERV sert de mémoire partagée interrogeable par n'importe quel contrôleur sur le bus. Persister « ce palier vient de la Planification » sur l'ERV permet à un contrôleur qui se connecte après coup (un remplacement, ou nous) de le savoir sans avoir accès à la logique interne du contrôleur mural d'origine. Reste à confirmer si ça change aussi le comportement de l'ERV lui-même (par exemple, vers quoi il revient après un Turbo/Boost déclenché pendant que la Planification est active).
+
+**Limitation** : Avec le mode Planification démarré sur du contrôleur mural, l'ESP32 en mode écoute va afficher le mode dicté par le contrôleur murale. Si l'ESP32 prend le contrôle, les changements de mode de la Planifcation ne se feront pas tant que le contrôleur mural n'aura pas le contrôle.
+
+## 12. Réinitialisation du filtre, séquence en trois messages
 
 **Le contrôleur mural offre 1 à 24 mois**, chacun un multiple exact de 30 jours, pas de vrai calendrier (28-31 jours), juste `mois × 2 592 000 s`. Exemples :
 
