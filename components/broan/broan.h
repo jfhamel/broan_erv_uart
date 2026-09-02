@@ -249,7 +249,7 @@ public:
 		// Maintenance
 		{ 0x01, 0x30, BroanFieldType::Byte, {0}, UPDATE_RATE_SLOW }, // Set to 0x01 to reset filter
 		{ 0x08, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_SLOW }, // Number of seconds until filter needs reset. Set along side reset byte
-		{ 0x09, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_SLOW }, // FilterLifeStage. Wall controller writes the desired FilterLife here first, before FilterReset.
+		{ 0x09, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_NEVER }, // FilterLifeStage. Wall controller writes the desired FilterLife here first, before FilterReset.
 
 		// Diagnostic
 		{ 0x1A, 0x00, BroanFieldType::Int, {0}, UPDATE_RATE_FAST }, // Warning code -1 = OK, if multiple warnings, will cycle through on each read.
