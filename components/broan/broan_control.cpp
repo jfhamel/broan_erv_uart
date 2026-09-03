@@ -142,12 +142,21 @@ void BroanComponent::setFilterLife( uint32_t days )
 	m_vecFields[FilterLifeStage].markDirty();
 	writeRegisters( vecStage );
 
-	std::vector<BroanField_t> vecApply;
-	vecApply.push_back( m_vecFields[FilterReset].copyForUpdate( (uint8_t)1 ) );
-	vecApply.push_back( m_vecFields[FilterLife].copyForUpdate( unNewFilterLife ) );
+	std::vector<BroanField_t> vecFields;
+	uint8_t unFilterReset = 1;
+
+	vecFields.push_back( m_vecFields[FilterLife].copyForUpdate( unNewFilterLife ) );
+	vecFields.push_back( m_vecFields[FilterReset].copyForUpdate( unFilterReset ) );
+
 	m_vecFields[FilterReset].markDirty();
 	m_vecFields[FilterLife].markDirty();
-	writeRegisters( vecApply );
+
+	writeRegisters( vecFields );
+
+	std::vector<BroanField_t> vecConfirm;
+	vecConfirm.push_back( m_vecFields[FilterLife].copyForUpdate( unNewFilterLife ) );
+	m_vecFields[FilterLife].markDirty();
+	writeRegisters( vecConfirm );
 }
 
 // Public bridge for filter reset
