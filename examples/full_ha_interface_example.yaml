@@ -30,7 +30,7 @@ captive_portal:
 external_components:
   - source:
       type: git
-      url: https://github.com/your_repositoty
+      url: https://github.com/your_repository
       ref: your_branch
       refresh: always
     components: [ broan ]
