@@ -107,7 +107,6 @@ void BroanComponent::resetFilter()
 
 	std::vector<BroanField_t> vecStage;
 	vecStage.push_back( m_vecFields[FilterLifeStage].copyForUpdate( unNewFilterLife ) );
-	m_vecFields[FilterLifeStage].markDirty();
 	writeRegisters( vecStage );
 
 	std::vector<BroanField_t> vecFields;
